@@ -63,8 +63,14 @@ const registerCustomer = async (data) => {
     // Step 4: Hash password
     const passwordHash = await bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
 
-    // Step 5: Create Account (status: UNVERIFIED)
-    const account = await Account.create({
+    // Step 5: Generate 6-digit OTP
+    const verificationCode = generateVerificationCode();
+
+    // Step 6: Hash OTP and save to CodeVerification (expires in 10 minutes)
+    const codeHash = await bcrypt.hash(verificationCode, BCRYPT_SALT_ROUNDS);
+    const expiredAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+    const pendingData = {
         username,
         email: email.toLowerCase(),
         phone,
@@ -72,45 +78,34 @@ const registerCustomer = async (data) => {
         fullName,
         gender: gender || 'UNKNOWN',
         dob: dob ? new Date(dob) : undefined,
-        role: 'CUSTOMER',
-        status: 'UNVERIFIED',
-        isEmailVerified: false,
-        isPhoneVerified: false
-    });
-
-    // Step 6: Generate 6-digit OTP
-    const verificationCode = generateVerificationCode();
-
-    // Step 7: Hash OTP and save to CodeVerification (expires in 10 minutes)
-    const codeHash = await bcrypt.hash(verificationCode, BCRYPT_SALT_ROUNDS);
-    const expiredAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+        role: 'CUSTOMER'
+    };
 
     await CodeVerification.create({
-        accountId: account._id,
+        accountId: null,
         target: email.toLowerCase(),
         targetType: 'EMAIL',
         type: 'REGISTER',
         codeHash,
-        expiredAt
+        expiredAt,
+        pendingData
     });
 
-    // Step 8: Send OTP via email and return data
+    // Step 7: Send OTP via email and return data
     emailService.sendVerificationEmail(email.toLowerCase(), verificationCode)
         .catch(err => console.error('Failed to send verification email:', err));
 
     return {
         account: {
-            _id: account._id,
-            username: account.username,
-            email: account.email,
-            phone: account.phone,
-            fullName: account.fullName,
-            gender: account.gender,
-            dob: account.dob,
-            role: account.role,
-            status: account.status,
-            profilePicture: account.profilePicture,
-            createdAt: account.createdAt
+            username,
+            email: email.toLowerCase(),
+            phone,
+            fullName,
+            gender: gender || 'UNKNOWN',
+            dob: dob ? new Date(dob) : undefined,
+            role: 'CUSTOMER',
+            status: 'UNVERIFIED',
+            createdAt: new Date()
         },
         ...(process.env.NODE_ENV === 'development' ? { verificationCode } : {})
     };
@@ -336,24 +331,59 @@ const verifyEmail = async (email, code) => {
         throw new AppError('Incorrect verification code', 400);
     }
 
-    // Code is valid! Mark as used
-    verification.used = true;
-    verification.usedAt = new Date();
-    await verification.save();
+    let account;
+    if (verification.pendingData) {
+        const { username, email: pendingEmail, phone, passwordHash, fullName, gender, dob, role } = verification.pendingData;
 
-    // Activate user account
-    const account = await Account.findOneAndUpdate(
-        { email: email.toLowerCase(), deletedAt: null },
-        { 
-            status: 'ACTIVE', 
-            isEmailVerified: true 
-        },
-        { returnDocument: 'after' }
-    );
+        // Double check duplication to prevent race conditions
+        const existingEmail = await Account.findOne({ email: pendingEmail.toLowerCase(), deletedAt: null });
+        if (existingEmail) {
+            throw new AppError('This email is already registered', 409);
+        }
+
+        const existingUsername = await Account.findOne({ username, deletedAt: null });
+        if (existingUsername) {
+            throw new AppError('This username is already taken', 409);
+        }
+
+        const existingPhone = await Account.findOne({ phone, deletedAt: null });
+        if (existingPhone) {
+            throw new AppError('This phone number is already registered', 409);
+        }
+
+        account = await Account.create({
+            username,
+            email: pendingEmail.toLowerCase(),
+            phone,
+            passwordHash,
+            fullName,
+            gender: gender || 'UNKNOWN',
+            dob: dob ? new Date(dob) : undefined,
+            role: role || 'CUSTOMER',
+            status: 'ACTIVE',
+            isEmailVerified: true,
+            isPhoneVerified: false
+        });
+    } else {
+        // Fallback for older registers where Account was created on register step
+        account = await Account.findOneAndUpdate(
+            { email: email.toLowerCase(), deletedAt: null },
+            { 
+                status: 'ACTIVE', 
+                isEmailVerified: true 
+            },
+            { returnDocument: 'after' }
+        );
+    }
 
     if (!account) {
         throw new AppError('Account not found', 404);
     }
+
+    // Code is valid! Mark as used only after account creation/update succeeds
+    verification.used = true;
+    verification.usedAt = new Date();
+    await verification.save();
 
     return account;
 };
@@ -379,6 +409,35 @@ const forgotPassword = async (email) => {
     });
 
     if (!account) {
+        // Check if there is an unused registration code verification for this email
+        const registerVerification = await CodeVerification.findOne({
+            target: email.toLowerCase(),
+            targetType: 'EMAIL',
+            type: 'REGISTER',
+            used: false
+        }).sort({ createdAt: -1 });
+
+        if (registerVerification && registerVerification.pendingData) {
+            const verificationCode = generateVerificationCode();
+            const codeHash = await bcrypt.hash(verificationCode, BCRYPT_SALT_ROUNDS);
+            const expiredAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+            await CodeVerification.create({
+                accountId: null,
+                target: email.toLowerCase(),
+                targetType: 'EMAIL',
+                type: 'REGISTER',
+                codeHash,
+                expiredAt,
+                pendingData: registerVerification.pendingData
+            });
+
+            emailService.sendVerificationEmail(email.toLowerCase(), verificationCode)
+                .catch(err => console.error('Failed to send verification email:', err));
+
+            return { message: 'Verification code has been resent to your email.' };
+        }
+
         throw new AppError('Account with this email does not exist', 404);
     }
 
