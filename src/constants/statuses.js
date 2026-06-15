@@ -1,1 +1,22 @@
-// src/constants/statuses.js
+module.exports = {
+    ACCOUNT_STATUS: {
+        UNVERIFIED: 'UNVERIFIED',
+        ACTIVE: 'ACTIVE',
+        DELETED: 'DELETED',
+        BANNED: 'BANNED',
+        PENDING_APPROVAL: 'PENDING_APPROVAL'
+    },
+
+    ADMIN_STATUS: {
+        ACTIVE: 'ACTIVE',
+        DISABLED: 'DISABLED'
+    },
+
+    CODE_VERIFICATION_TYPE: {
+        REGISTER: 'REGISTER',
+        LOGIN: 'LOGIN',
+        RESET_PASSWORD: 'RESET_PASSWORD',
+        VERIFY_EMAIL: 'VERIFY_EMAIL',
+        VERIFY_PHONE: 'VERIFY_PHONE'
+    }
+};
