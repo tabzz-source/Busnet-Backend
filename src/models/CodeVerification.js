@@ -57,6 +57,11 @@ const codeVerificationSchema = new mongoose.Schema(
         maxAttempts: {
             type: Number,
             default: 5
+        },
+
+        pendingData: {
+            type: mongoose.Schema.Types.Mixed,
+            default: null
         }
     },
     {
