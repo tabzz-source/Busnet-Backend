@@ -67,6 +67,12 @@ const accountSchema = new mongoose.Schema(
             default: false
         },
 
+        googleId: {
+            type: String,
+            unique: true,
+            sparse: true
+        },
+
         isEmailVerified: {
             type: Boolean,
             default: false
@@ -82,6 +88,10 @@ const accountSchema = new mongoose.Schema(
             default: 0
         },
 
+        isAutoPublishBlog: {
+            type: Boolean,
+            default: false
+        },
         deletedAt: {
             type: Date,
             default: null

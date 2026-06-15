@@ -1,5 +1,4 @@
 const express = require('express');
-
 const customerRoutes = require('./customer');
 const adminRoutes = require('./admin');
 
