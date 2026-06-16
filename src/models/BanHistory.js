@@ -1,4 +1,4 @@
-import mongoose from "mongoose";
+const mongoose = require("mongoose");
 
 const { Schema, model } = mongoose;
 
@@ -6,12 +6,12 @@ const { Schema, model } = mongoose;
 // ENUMS
 // =========================
 
-export const BanType = {
+const BanType = {
     TEMPORARY: "TEMPORARY",
     PERMANENT: "PERMANENT",
 };
 
-export const BanStatus = {
+const BanStatus = {
     ACTIVE: "ACTIVE",
     EXPIRED: "EXPIRED",
     REVOKED: "REVOKED",
@@ -86,4 +86,8 @@ const banHistorySchema = new Schema(
     }
 );
 
-export const BanHistory = model("BanHistory", banHistorySchema);
+const BanHistory = model("BanHistory", banHistorySchema);
+
+module.exports = BanHistory;
+module.exports.BanType = BanType;
+module.exports.BanStatus = BanStatus;

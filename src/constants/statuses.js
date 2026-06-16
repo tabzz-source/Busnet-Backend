@@ -1,1 +1,9 @@
-// src/constants/statuses.js
+const STATUSES = Object.freeze({
+    UNVERIFIED: 'UNVERIFIED',
+    ACTIVE: 'ACTIVE',
+    DELETED: 'DELETED',
+    BANNED: 'BANNED',
+    PENDING_APPROVAL: 'PENDING_APPROVAL'
+});
+
+module.exports = STATUSES;
