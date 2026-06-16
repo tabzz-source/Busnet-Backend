@@ -31,7 +31,7 @@ const accountSchema = new mongoose.Schema(
 
         role: {
             type: String,
-            enum: ['CUSTOMER', 'PARTNER', 'ADMIN'],
+            enum: ['CUSTOMER', 'PARTNER'],
             default: 'CUSTOMER',
             required: true
         },

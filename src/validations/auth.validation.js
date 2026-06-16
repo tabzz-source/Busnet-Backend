@@ -195,6 +195,36 @@ const validateResetPassword = (req, res, next) => runValidation(req, res, next, 
 const validateChangePassword = (req, res, next) => runValidation(req, res, next, changePasswordRules);
 const validateLogin = (req, res, next) => runValidation(req, res, next, loginRules);
 
+// ============================
+// Admin auth validations (express-validator chains, used with `validate` middleware)
+// ============================
+
+const forgotPasswordValidation = [
+    body('email')
+        .isEmail()
+        .withMessage('Please enter a valid email')
+];
+
+const resetPasswordValidation = [
+    body('email')
+        .isEmail()
+        .withMessage('Please enter a valid email'),
+
+    body('code')
+        .notEmpty()
+        .withMessage('Code is required'),
+
+    body('newPassword')
+        .isLength({ min: 6 })
+        .withMessage('New password must be at least 6 characters')
+];
+
+const verifyEmailValidation = [
+    body('code')
+        .notEmpty()
+        .withMessage('Code is required')
+];
+
 module.exports = {
     validateRegister,
     validateVerifyEmail,
@@ -202,7 +232,8 @@ module.exports = {
     validateVerifyResetCode,
     validateResetPassword,
     validateChangePassword,
-    validateLogin
+    validateLogin,
+    forgotPasswordValidation,
+    resetPasswordValidation,
+    verifyEmailValidation
 };
-
-
