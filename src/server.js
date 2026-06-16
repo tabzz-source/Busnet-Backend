@@ -1,12 +1,13 @@
+const dotenv = require("dotenv");
+
+dotenv.config();
+
 const express = require("express");
 const cors = require("cors");
-const dotenv = require("dotenv");
 
 const connectDB = require("./config/db");
 const routes = require("./routes");
 const { notFound, errorHandler } = require("./middlewares/errorMiddleware");
-
-dotenv.config();
 
 connectDB();
 

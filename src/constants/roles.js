@@ -1,1 +1,5 @@
-// src/constants/roles.js
+module.exports = {
+    CUSTOMER: 'CUSTOMER',
+    PARTNER: 'PARTNER',
+    ADMIN: 'ADMIN'
+};
