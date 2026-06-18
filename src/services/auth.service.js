@@ -890,6 +890,55 @@ const forgotPasswordPartner = async (email) => {
 };
 
 /**
+ * Verify reset code for partner
+ * @param {string} email
+ * @param {string} code
+ * @returns {Promise<boolean>}
+ */
+const verifyResetCodePartner = async (email, code) => {
+    if (!email || !code) {
+        throw new AppError('Email and code are required', 400);
+    }
+
+    const account = await Account.findOne({
+        email: email.toLowerCase(),
+        role: 'PARTNER',
+        deletedAt: null
+    });
+
+    if (!account) {
+        throw new AppError('Partner account with this email does not exist', 404);
+    }
+
+    const verification = await CodeVerification.findOne({
+        accountId: account._id,
+        target: email.toLowerCase(),
+        targetType: 'EMAIL',
+        type: 'RESET_PASSWORD',
+        used: false,
+        expiredAt: { $gt: new Date() }
+    }).sort({ createdAt: -1 }).select('+codeHash');
+
+    if (!verification) {
+        throw new AppError('Invalid or expired verification code', 400);
+    }
+
+    if (verification.attemptCount >= verification.maxAttempts) {
+        throw new AppError('Too many failed attempts. Please request a new code', 400);
+    }
+
+    const isMatch = await bcrypt.compare(code, verification.codeHash);
+    if (!isMatch) {
+        verification.attemptCount += 1;
+        await verification.save();
+        const remainingAttempts = verification.maxAttempts - verification.attemptCount;
+        throw new AppError(`Incorrect code. ${remainingAttempts} attempts remaining`, 400);
+    }
+
+    return true;
+};
+
+/**
  * Reset password for partner using verification code
  * @param {string} email
  * @param {string} code
@@ -904,14 +953,25 @@ const resetPasswordPartner = async (email, code, newPassword) => {
         throw new AppError('Password must be at least 6 characters', 400);
     }
 
+    const account = await Account.findOne({
+        email: email.toLowerCase(),
+        role: 'PARTNER',
+        deletedAt: null
+    });
+
+    if (!account) {
+        throw new AppError('Partner account not found', 404);
+    }
+
     // 1. Find verification code
     const verification = await CodeVerification.findOne({
+        accountId: account._id,
         target: email.toLowerCase(),
         targetType: 'EMAIL',
         type: 'RESET_PASSWORD',
         used: false,
         expiredAt: { $gt: new Date() }
-    }).select('+codeHash');
+    }).sort({ createdAt: -1 }).select('+codeHash');
 
     if (!verification) {
         throw new AppError('Invalid or expired verification code', 400);
@@ -934,13 +994,13 @@ const resetPasswordPartner = async (email, code, newPassword) => {
     const passwordHash = await bcrypt.hash(newPassword, BCRYPT_SALT_ROUNDS);
 
     // 4. Update account password
-    const account = await Account.findOneAndUpdate(
-        { email: email.toLowerCase(), role: 'PARTNER', deletedAt: null },
+    const updatedAccount = await Account.findOneAndUpdate(
+        { _id: account._id, role: 'PARTNER', deletedAt: null },
         { passwordHash },
         { returnDocument: 'after' }
     );
 
-    if (!account) {
+    if (!updatedAccount) {
         throw new AppError('Partner account not found', 404);
     }
 
@@ -981,12 +1041,14 @@ module.exports = {
     forgotPassword,
     verifyResetCode,
     resetPassword,
+    loginPartner,
     loginAdmin,
     sendVerifyEmailAdmin,
     verifyEmailAdmin,
     forgotPasswordAdmin,
     resetPasswordAdmin,
     forgotPasswordPartner,
+    verifyResetCodePartner,
     resetPasswordPartner,
     resendResetCodePartner
 };

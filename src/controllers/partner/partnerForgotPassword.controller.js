@@ -37,6 +37,25 @@ const resetPassword = async (req, res) => {
     }
 };
 
+const verifyResetCode = async (req, res) => {
+    try {
+        const { email, code } = req.body;
+        await authService.verifyResetCodePartner(email, code);
+
+        return res.status(200).json({
+            success: true,
+            message: 'Verification code is valid',
+            data: { valid: true }
+        });
+    } catch (error) {
+        const statusCode = error.statusCode || 400;
+        return res.status(statusCode).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
 const resendResetCode = async (req, res) => {
     try {
         const { email } = req.body;
@@ -58,6 +77,7 @@ const resendResetCode = async (req, res) => {
 
 module.exports = {
     sendResetCode,
+    verifyResetCode,
     resetPassword,
     resendResetCode
 };
