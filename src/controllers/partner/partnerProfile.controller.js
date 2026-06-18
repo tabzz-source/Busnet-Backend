@@ -2,7 +2,15 @@ const partnerService = require('../../services/partner.service');
 
 const getProfile = async (req, res) => {
     try {
-        const accountId = req.user.id;
+        const accountId = req.user?.id || req.user?._id;
+        
+        if (!accountId) {
+            return res.status(401).json({
+                success: false,
+                message: 'Unauthorized'
+            });
+        }
+
         const profile = await partnerService.getPartnerProfileByAccountId(accountId);
 
         return res.status(200).json({
