@@ -23,6 +23,7 @@ const createBookingValidation = [
     body('passengerName').isString().trim().notEmpty().withMessage('passengerName is required'),
     body('passengerPhone').isString().trim().notEmpty().withMessage('passengerPhone is required'),
     body('passengerEmail').optional({ nullable: true }).isEmail().withMessage('passengerEmail must be a valid email'),
+    body('amount').optional({ nullable: true }).isFloat({ min: 0 }).withMessage('amount must be a non-negative number'),
     body('customerNote').optional().isString(),
 ];
 

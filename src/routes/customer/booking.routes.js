@@ -20,12 +20,39 @@ router.post(
 );
 
 router.get(
+    '/:bookingCode/payment',
+    authenticate,
+    restrictTo('CUSTOMER'),
+    bookingCodeParamValidation,
+    validate,
+    bookingController.getBookingPayment
+);
+
+router.get(
+    '/:bookingCode/payment-status',
+    authenticate,
+    restrictTo('CUSTOMER'),
+    bookingCodeParamValidation,
+    validate,
+    bookingController.getBookingPaymentStatus
+);
+
+router.get(
     '/:bookingCode/status',
     authenticate,
     restrictTo('CUSTOMER'),
     bookingCodeParamValidation,
     validate,
     bookingController.getBookingStatus
+);
+
+router.get(
+    '/:bookingCode/tickets',
+    authenticate,
+    restrictTo('CUSTOMER'),
+    bookingCodeParamValidation,
+    validate,
+    bookingController.getBookingTickets
 );
 
 router.get(
