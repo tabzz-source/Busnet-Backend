@@ -4,8 +4,9 @@ const blogRoutes = require('./blog.routes');
 const subscriptionRoutes = require('./subscription.routes');
 const operatorRoutes = require('./operator.routes');
 const profileRoutes = require('./profile.routes');
-const tripRoutes = require('./trip.routes');
-const bookingRoutes = require('./booking.routes');
+const favouriteRoutes = require('./favourite.routes');
+const feedbackRoutes = require('./feedback.routes');
+const reportRoutes = require('./report.routes')
 
 const router = express.Router();
 
@@ -14,6 +15,9 @@ router.use('/blogs', blogRoutes);
 router.use('/subscriptions', subscriptionRoutes);
 router.use('/operators', operatorRoutes);
 router.use('/profile', profileRoutes);
+router.use('./favourite',favouriteRoutes);
+router.use('./report',reportRoutes);
+
 router.use('/trips', tripRoutes);
 router.use('/bookings', bookingRoutes);
 
