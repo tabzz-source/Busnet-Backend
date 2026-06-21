@@ -3,10 +3,13 @@ const PartnerInformation = require('../models/PartnerInformation');
 const PartnerSubscription = require('../models/PartnerSubscription');
 const BanHistory = require('../models/BanHistory');
 const AppError = require('../utils/AppError');
+const uploadToCloudinary = require('../utils/uploadToCloudinary');
 const { PARTNER } = require('../constants/roles');
 
 const partnerListSelect = '_id username email phone fullName status profilePicture isEmailVerified isPhoneVerified banCounts createdAt updatedAt';
 const partnerDetailSelect = `${partnerListSelect} gender dob isAutoPublishBlog`;
+const PARTNER_PROFILE_FOLDER = process.env.CLOUDINARY_PARTNER_PROFILE_FOLDER || 'busnet/partners/profiles';
+const PARTNER_COVER_FOLDER = process.env.CLOUDINARY_PARTNER_COVER_FOLDER || 'busnet/partners/covers';
 
 const escapeRegex = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -146,13 +149,6 @@ const deletePartner = async (partnerId) => {
     return { message: 'Partner deleted successfully' };
 };
 
-module.exports = {
-    getPartners,
-    getPartnerDetail,
-    updatePartnerStatus,
-    deletePartner
-};
-
 class PartnerService {
     /**
      * Get partner profile by accountId (for authenticated partners)
@@ -178,6 +174,114 @@ class PartnerService {
         } catch (error) {
             throw error;
         }
+    }
+
+    async updatePartnerProfileByAccountId(accountId, data, files = {}) {
+        if (!accountId) {
+            throw new AppError('Account id is required', 400);
+        }
+
+        const account = await Account.findOne({ _id: accountId, role: PARTNER, deletedAt: null });
+
+        if (!account) {
+            throw new AppError('Partner account not found', 404);
+        }
+
+        const profile = await PartnerInformation.findOne({ accountId });
+
+        if (!profile) {
+            throw new AppError('Partner profile not found', 404);
+        }
+
+        const hasProfilePicture = Boolean(files.profilePicture?.[0]);
+        const hasCoverImage = Boolean(files.coverImage?.[0]);
+        const updatableFields = [
+            'fullName',
+            'phone',
+            'gender',
+            'dob',
+            'operatorName',
+            'operatorPhone',
+            'description',
+            'amenities',
+            'policies',
+            'bankName',
+            'bankAccountName',
+            'bankNumber',
+            'bankBranch',
+            'taxCode'
+        ];
+        const hasBodyUpdates = updatableFields.some((field) => data[field] !== undefined);
+
+        if (!hasBodyUpdates && !hasProfilePicture && !hasCoverImage) {
+            throw new AppError('No profile data provided for update', 400);
+        }
+
+        if (data.phone !== undefined && data.phone !== account.phone) {
+            const existingPhone = await Account.findOne({
+                _id: { $ne: account._id },
+                phone: data.phone,
+                deletedAt: null
+            });
+
+            if (existingPhone) {
+                throw new AppError('This phone number is already registered', 409);
+            }
+
+            account.phone = data.phone;
+        }
+
+        if (data.fullName !== undefined) {
+            account.fullName = data.fullName.trim();
+        }
+
+        if (data.gender !== undefined) {
+            account.gender = data.gender;
+        }
+
+        if (data.dob !== undefined) {
+            account.dob = data.dob ? new Date(data.dob) : null;
+        }
+
+        if (data.operatorName !== undefined) {
+            profile.operatorName = data.operatorName.trim();
+        }
+
+        if (data.operatorPhone !== undefined) {
+            profile.operatorPhone = data.operatorPhone;
+        }
+
+        if (data.description !== undefined) {
+            profile.description = data.description;
+        }
+
+        if (data.amenities !== undefined) {
+            profile.amenities = this._parseArrayField(data.amenities, 'amenities');
+        }
+
+        if (data.policies !== undefined) {
+            profile.policies = this._parseObjectField(data.policies, 'policies');
+        }
+
+        ['bankName', 'bankAccountName', 'bankNumber', 'bankBranch', 'taxCode'].forEach((field) => {
+            if (data[field] !== undefined) {
+                profile[field] = data[field] || null;
+            }
+        });
+
+        if (hasProfilePicture) {
+            const uploaded = await uploadToCloudinary(files.profilePicture[0].buffer, PARTNER_PROFILE_FOLDER);
+            profile.profilePicture = uploaded.url;
+        }
+
+        if (hasCoverImage) {
+            const uploaded = await uploadToCloudinary(files.coverImage[0].buffer, PARTNER_COVER_FOLDER);
+            profile.coverImage = uploaded.url;
+        }
+
+        await Promise.all([account.save(), profile.save()]);
+
+        return this.getPartnerProfileByAccountId(accountId);
     }
 
     /**
@@ -218,6 +322,71 @@ class PartnerService {
             updatedAt: profile.updatedAt
         };
     }
+
+    _parseArrayField(value, fieldName) {
+        if (Array.isArray(value)) {
+            return value.map((item) => String(item).trim()).filter(Boolean);
+        }
+
+        if (typeof value !== 'string') {
+            throw new AppError(`${fieldName} must be an array`, 400);
+        }
+
+        const trimmedValue = value.trim();
+
+        if (!trimmedValue) {
+            return [];
+        }
+
+        try {
+            const parsed = JSON.parse(trimmedValue);
+
+            if (!Array.isArray(parsed)) {
+                throw new Error();
+            }
+
+            return parsed.map((item) => String(item).trim()).filter(Boolean);
+        } catch (error) {
+            return trimmedValue.split(',').map((item) => item.trim()).filter(Boolean);
+        }
+    }
+
+    _parseObjectField(value, fieldName) {
+        if (value && typeof value === 'object' && !Array.isArray(value)) {
+            return value;
+        }
+
+        if (typeof value !== 'string') {
+            throw new AppError(`${fieldName} must be an object`, 400);
+        }
+
+        const trimmedValue = value.trim();
+
+        if (!trimmedValue) {
+            return {};
+        }
+
+        try {
+            const parsed = JSON.parse(trimmedValue);
+
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+                throw new Error();
+            }
+
+            return parsed;
+        } catch (error) {
+            throw new AppError(`${fieldName} must be a valid JSON object`, 400);
+        }
+    }
 }
 
-module.exports = new PartnerService();
+const partnerService = new PartnerService();
+
+module.exports = {
+    getPartners,
+    getPartnerDetail,
+    updatePartnerStatus,
+    deletePartner,
+    getPartnerProfileByAccountId: partnerService.getPartnerProfileByAccountId.bind(partnerService),
+    updatePartnerProfileByAccountId: partnerService.updatePartnerProfileByAccountId.bind(partnerService)
+};
