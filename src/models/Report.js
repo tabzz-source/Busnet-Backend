@@ -1,4 +1,3 @@
-// src/models/Report.js
 const mongoose = require('mongoose');
 
 const reportSchema = new mongoose.Schema(
@@ -41,14 +40,19 @@ const reportSchema = new mongoose.Schema(
 
         status: {
             type: String,
-            enum: ['PENDING', 'IN_REVIEW', 'RESOLVED', 'REJECTED'],
+            enum: ['PENDING', 'IN_REVIEW', 'RESOLVED', 'REJECTED', 'DISMISSED'],
             default: 'PENDING',
             index: true
         },
 
+        adminNote: {
+            type: String,
+            default: null
+        },
+
         resolvedBy: {
             type: mongoose.Schema.Types.ObjectId,
-            ref: 'Account',
+            ref: 'Admin',
             default: null
         },
 

@@ -17,6 +17,24 @@ const getStats = async (req, res) => {
     }
 };
 
+const getRevenueBreakdown = async (req, res) => {
+    try {
+        const result = await dashboardService.getRevenueBreakdown();
+
+        return res.status(200).json({
+            success: true,
+            message: 'Revenue breakdown fetched successfully',
+            data: result
+        });
+    } catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
 module.exports = {
-    getStats
+    getStats,
+    getRevenueBreakdown
 };
