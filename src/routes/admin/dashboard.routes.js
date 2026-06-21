@@ -9,5 +9,6 @@ const router = express.Router();
 router.use(protect, restrictTo(ADMIN));
 
 router.get('/stats', adminDashboardController.getStats);
+router.get('/revenue-breakdown', adminDashboardController.getRevenueBreakdown);
 
 module.exports = router;

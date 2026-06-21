@@ -352,11 +352,6 @@ const loginPartner = async ({ identifier, password }) => {
     };
 };
 
-module.exports = {
-    loginCustomer,
-    loginPartner
-};
-
 // ============================
 // VERIFY EMAIL
 // ============================
