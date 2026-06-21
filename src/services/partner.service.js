@@ -149,31 +149,43 @@ const deletePartner = async (partnerId) => {
     return { message: 'Partner deleted successfully' };
 };
 
-class PartnerService {
-    /**
-     * Get partner profile by accountId (for authenticated partners)
-     * Returns full profile with all partner information
-     */
-    async getPartnerProfileByAccountId(accountId) {
-        try {
-            const profile = await PartnerInformation.findOne({ accountId })
-                .populate({
-                    path: 'accountId',
-                    select: 'fullName email phone profilePicture status isEmailVerified isPhoneVerified'
-                })
-                .exec();
+const _formatPartnerProfile = (profile) => ({
+    _id: profile._id,
+    accountId: profile.accountId._id,
+    operatorName: profile.operatorName,
+    operatorPhone: profile.operatorPhone,
+    description: profile.description,
+    amenities: profile.amenities,
+    policies: profile.policies,
+    profilePicture: profile.profilePicture,
+    coverImage: profile.coverImage,
+    bankName: profile.bankName,
+    bankAccountName: profile.bankAccountName,
+    bankNumber: profile.bankNumber,
+    bankBranch: profile.bankBranch,
+    sepayVa: profile.sepayVa,
+    businessLicense: profile.businessLicense,
+    taxCode: profile.taxCode,
+    isVerified: profile.isVerified,
+    verifiedAt: profile.verifiedAt,
+    ratingAvg: profile.ratingAvg,
+    totalReviews: profile.totalReviews,
+    accountInfo: {
+        fullName: profile.accountId?.fullName,
+        email: profile.accountId?.email,
+        phone: profile.accountId?.phone,
+        profilePicture: profile.accountId?.profilePicture,
+        isEmailVerified: profile.accountId?.isEmailVerified,
+        isPhoneVerified: profile.accountId?.isPhoneVerified,
+        status: profile.accountId?.status
+    },
+    createdAt: profile.createdAt,
+    updatedAt: profile.updatedAt
+});
 
-            if (!profile) {
-                const error = new Error('Partner profile not found');
-                error.statusCode = 404;
-                throw error;
-            }
-
-            // Return complete profile for authenticated partner
-            return this._formatProfile(profile);
-        } catch (error) {
-            throw error;
-        }
+const _parseArrayField = (value, fieldName) => {
+    if (Array.isArray(value)) {
+        return value.map((item) => String(item).trim()).filter(Boolean);
     }
 
     async updatePartnerProfileByAccountId(accountId, data, files = {}) {
@@ -283,111 +295,114 @@ class PartnerService {
         await Promise.all([account.save(), profile.save()]);
 
         return this.getPartnerProfileByAccountId(accountId);
+    if (typeof value !== 'string') {
+        throw new AppError(`${fieldName} must be an array`, 400);
+    }
+    const trimmedValue = value.trim();
+    if (!trimmedValue) return [];
+    try {
+        const parsed = JSON.parse(trimmedValue);
+        if (!Array.isArray(parsed)) throw new Error();
+        return parsed.map((item) => String(item).trim()).filter(Boolean);
+    } catch {
+        return trimmedValue.split(',').map((item) => item.trim()).filter(Boolean);
+    }
+};
+
+const _parseObjectField = (value, fieldName) => {
+    if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+    if (typeof value !== 'string') {
+        throw new AppError(`${fieldName} must be an object`, 400);
+    }
+    const trimmedValue = value.trim();
+    if (!trimmedValue) return {};
+    try {
+        const parsed = JSON.parse(trimmedValue);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
+        return parsed;
+    } catch {
+        throw new AppError(`${fieldName} must be a valid JSON object`, 400);
+    }
+};
+
+const getPartnerProfileByAccountId = async (accountId) => {
+    const profile = await PartnerInformation.findOne({ accountId })
+        .populate({
+            path: 'accountId',
+            select: 'fullName email phone profilePicture status isEmailVerified isPhoneVerified'
+        })
+        .exec();
+
+    if (!profile) {
+        throw new AppError('Partner profile not found', 404);
     }
 
-    /**
-     * Format profile data for partner view
-     */
-    _formatProfile(profile) {
-        return {
-            _id: profile._id,
-            accountId: profile.accountId._id,
-            operatorName: profile.operatorName,
-            operatorPhone: profile.operatorPhone,
-            description: profile.description,
-            amenities: profile.amenities,
-            policies: profile.policies,
-            profilePicture: profile.profilePicture,
-            coverImage: profile.coverImage,
-            bankName: profile.bankName,
-            bankAccountName: profile.bankAccountName,
-            bankNumber: profile.bankNumber,
-            bankBranch: profile.bankBranch,
-            sepayVa: profile.sepayVa,
-            businessLicense: profile.businessLicense,
-            taxCode: profile.taxCode,
-            isVerified: profile.isVerified,
-            verifiedAt: profile.verifiedAt,
-            ratingAvg: profile.ratingAvg,
-            totalReviews: profile.totalReviews,
-            accountInfo: {
-                fullName: profile.accountId?.fullName,
-                email: profile.accountId?.email,
-                phone: profile.accountId?.phone,
-                profilePicture: profile.accountId?.profilePicture,
-                isEmailVerified: profile.accountId?.isEmailVerified,
-                isPhoneVerified: profile.accountId?.isPhoneVerified,
-                status: profile.accountId?.status
-            },
-            createdAt: profile.createdAt,
-            updatedAt: profile.updatedAt
-        };
-    }
+    return _formatPartnerProfile(profile);
+};
 
-    _parseArrayField(value, fieldName) {
-        if (Array.isArray(value)) {
-            return value.map((item) => String(item).trim()).filter(Boolean);
-        }
+// const updatePartnerProfileByAccountId = async (accountId, data, files = {}) => {
+//     if (!accountId) {
+//         throw new AppError('Account id is required', 400);
+//     }
 
-        if (typeof value !== 'string') {
-            throw new AppError(`${fieldName} must be an array`, 400);
-        }
+//     const account = await Account.findOne({ _id: accountId, role: PARTNER, deletedAt: null });
+//     if (!account) throw new AppError('Partner account not found', 404);
 
-        const trimmedValue = value.trim();
+//     const profile = await PartnerInformation.findOne({ accountId });
+//     if (!profile) throw new AppError('Partner profile not found', 404);
 
-        if (!trimmedValue) {
-            return [];
-        }
+//     const hasProfilePicture = Boolean(files.profilePicture?.[0]);
+//     const hasCoverImage = Boolean(files.coverImage?.[0]);
+//     const updatableFields = [
+//         'fullName', 'phone', 'gender', 'dob',
+//         'operatorName', 'operatorPhone', 'description',
+//         'amenities', 'policies',
+//         'bankName', 'bankAccountName', 'bankNumber', 'bankBranch', 'taxCode'
+//     ];
+//     const hasBodyUpdates = updatableFields.some((field) => data[field] !== undefined);
 
-        try {
-            const parsed = JSON.parse(trimmedValue);
+//     if (!hasBodyUpdates && !hasProfilePicture && !hasCoverImage) {
+//         throw new AppError('No profile data provided for update', 400);
+//     }
 
-            if (!Array.isArray(parsed)) {
-                throw new Error();
-            }
+//     if (data.phone !== undefined && data.phone !== account.phone) {
+//         const existingPhone = await Account.findOne({ _id: { $ne: account._id }, phone: data.phone, deletedAt: null });
+//         if (existingPhone) throw new AppError('This phone number is already registered', 409);
+//         account.phone = data.phone;
+//     }
 
-            return parsed.map((item) => String(item).trim()).filter(Boolean);
-        } catch (error) {
-            return trimmedValue.split(',').map((item) => item.trim()).filter(Boolean);
-        }
-    }
+//     if (data.fullName !== undefined) account.fullName = data.fullName.trim();
+//     if (data.gender !== undefined) account.gender = data.gender;
+//     if (data.dob !== undefined) account.dob = data.dob ? new Date(data.dob) : null;
+//     if (data.operatorName !== undefined) profile.operatorName = data.operatorName.trim();
+//     if (data.operatorPhone !== undefined) profile.operatorPhone = data.operatorPhone;
+//     if (data.description !== undefined) profile.description = data.description;
+//     if (data.amenities !== undefined) profile.amenities = _parseArrayField(data.amenities, 'amenities');
+//     if (data.policies !== undefined) profile.policies = _parseObjectField(data.policies, 'policies');
 
-    _parseObjectField(value, fieldName) {
-        if (value && typeof value === 'object' && !Array.isArray(value)) {
-            return value;
-        }
+//     ['bankName', 'bankAccountName', 'bankNumber', 'bankBranch', 'taxCode'].forEach((field) => {
+//         if (data[field] !== undefined) profile[field] = data[field] || null;
+//     });
 
-        if (typeof value !== 'string') {
-            throw new AppError(`${fieldName} must be an object`, 400);
-        }
+//     if (hasProfilePicture) {
+//         const uploaded = await uploadToCloudinary(files.profilePicture[0].buffer, PARTNER_PROFILE_FOLDER);
+//         profile.profilePicture = uploaded.url;
+//     }
+//     if (hasCoverImage) {
+//         const uploaded = await uploadToCloudinary(files.coverImage[0].buffer, PARTNER_COVER_FOLDER);
+//         profile.coverImage = uploaded.url;
+//     }
 
-        const trimmedValue = value.trim();
+//     await Promise.all([account.save(), profile.save()]);
 
-        if (!trimmedValue) {
-            return {};
-        }
-
-        try {
-            const parsed = JSON.parse(trimmedValue);
-
-            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-                throw new Error();
-            }
-
-            return parsed;
-        } catch (error) {
-            throw new AppError(`${fieldName} must be a valid JSON object`, 400);
-        }
-    }
-}
-
-const partnerService = new PartnerService();
+//     return getPartnerProfileByAccountId(accountId);
+// };
 
 module.exports = {
     getPartners,
     getPartnerDetail,
     updatePartnerStatus,
     deletePartner,
-    getPartnerProfileByAccountId: partnerService.getPartnerProfileByAccountId.bind(partnerService),
-    updatePartnerProfileByAccountId: partnerService.updatePartnerProfileByAccountId.bind(partnerService)
+    getPartnerProfileByAccountId,
+    updatePartnerProfileByAccountId
 };

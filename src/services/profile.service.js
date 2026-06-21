@@ -1,6 +1,7 @@
 const bcrypt = require('bcryptjs');
 const Admin = require('../models/Admin');
 const uploadToCloudinary = require('../utils/uploadToCloudinary');
+const uploadLocal = require('../utils/uploadLocal');
 
 const formatAdminProfile = (admin) => ({
     _id: admin._id,
@@ -46,8 +47,14 @@ const updateAdminProfile = async (adminId, { fullName, username }, avatarFile) =
     }
 
     if (avatarFile) {
-        const { url } = await uploadToCloudinary(avatarFile.buffer, 'busnet/admins');
-        admin.avatar = url;
+        try {
+            const { url } = await uploadToCloudinary(avatarFile.buffer, 'busnet/admins');
+            admin.avatar = url;
+        } catch (err) {
+            console.error('[updateAdminProfile] Cloudinary failed, using local storage:', err.message);
+            const { url } = uploadLocal(avatarFile.buffer, avatarFile.originalname);
+            admin.avatar = url;
+        }
     }
 
     await admin.save();
