@@ -272,6 +272,7 @@ class PartnerService {
         if (hasProfilePicture) {
             const uploaded = await uploadToCloudinary(files.profilePicture[0].buffer, PARTNER_PROFILE_FOLDER);
             profile.profilePicture = uploaded.url;
+            account.profilePicture = uploaded.url;
         }
 
         if (hasCoverImage) {
