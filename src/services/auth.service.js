@@ -151,6 +151,13 @@ const loginCustomer = async ({ identifier, password }) => {
         throw new AppError('This account has not been activated', 403);
     }
 
+    if (!account.passwordHash) {
+        throw new AppError(
+            'This account does not have a password set. Please use Google login or reset your password.',
+            400
+        );
+    }
+
     const isMatch = await bcrypt.compare(password, account.passwordHash);
 
     if (!isMatch) {
@@ -324,6 +331,10 @@ const loginPartner = async ({ identifier, password }) => {
 
     if (account.status !== 'ACTIVE') {
         throw new Error('This account has not been activated');
+    }
+
+    if (!account.passwordHash) {
+        throw new Error('This account does not have a password set');
     }
 
     const isMatch = await bcrypt.compare(password, account.passwordHash);
