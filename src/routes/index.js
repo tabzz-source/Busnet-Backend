@@ -11,4 +11,8 @@ router.use('/admin', adminRoutes);
 router.use('/partner', partnerRoutes);
 router.use('/webhooks', webhookRoutes);
 
+const devRoutes = require('./dev.routes');
+
+router.use('/dev', devRoutes);
+
 module.exports = router;

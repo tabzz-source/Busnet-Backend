@@ -1,42 +1,65 @@
-const bookingService = require('../../services/booking.service');
 const asyncHandler = require('../../utils/asyncHandler');
 const { successResponse } = require('../../utils/response');
+const bookingService = require('../../services/booking.service');
 
 const createBooking = asyncHandler(async (req, res) => {
-    const result = await bookingService.createBookingWithPayment(req.user.id, req.body);
-    return successResponse(res, 201, 'Booking created successfully', result);
+    const customerId = req.user.id;
+
+    const data = await bookingService.createBooking(customerId, req.body);
+
+    return successResponse(res, 201, 'Booking created successfully', data);
 });
 
-const getBookingStatus = asyncHandler(async (req, res) => {
-    const result = await bookingService.getBookingStatus(req.user.id, req.params.bookingCode);
-    return successResponse(res, 200, 'Booking status retrieved successfully', result);
-});
+const getMyBookings = asyncHandler(async (req, res) => {
+    const customerId = req.user.id;
 
-const getBookingPayment = asyncHandler(async (req, res) => {
-    const result = await bookingService.getBookingPayment(req.user.id, req.params.bookingCode);
-    return successResponse(res, 200, 'Booking payment retrieved successfully', result);
-});
+    const data = await bookingService.getMyBookings(customerId, req.query);
 
-const getBookingPaymentStatus = asyncHandler(async (req, res) => {
-    const result = await bookingService.getBookingStatus(req.user.id, req.params.bookingCode);
-    return successResponse(res, 200, 'Booking payment status retrieved successfully', result);
+    return successResponse(res, 200, 'Bookings retrieved successfully', data);
 });
 
 const getBookingDetail = asyncHandler(async (req, res) => {
-    const result = await bookingService.getBookingDetail(req.user.id, req.params.bookingCode);
-    return successResponse(res, 200, 'Booking detail retrieved successfully', result);
+    const customerId = req.user.id;
+    const { bookingCode } = req.params;
+
+    const data = await bookingService.getBookingDetail(customerId, bookingCode);
+
+    return successResponse(res, 200, 'Booking detail retrieved successfully', data);
 });
 
-const getBookingTickets = asyncHandler(async (req, res) => {
-    const result = await bookingService.getBookingTickets(req.user.id, req.params.bookingCode);
-    return successResponse(res, 200, 'Booking tickets retrieved successfully', result);
+const getBookingStatus = asyncHandler(async (req, res) => {
+    const customerId = req.user.id;
+    const { bookingCode } = req.params;
+
+    const data = await bookingService.getBookingStatus(customerId, bookingCode);
+
+    return successResponse(res, 200, 'Booking status retrieved successfully', data);
+});
+
+const getBookingPayment = asyncHandler(async (req, res) => {
+    const customerId = req.user.id;
+    const { bookingCode } = req.params;
+
+    const data = await bookingService.getBookingPayment(customerId, bookingCode);
+
+    return successResponse(res, 200, 'Booking payment retrieved successfully', data);
+});
+
+const cancelBooking = asyncHandler(async (req, res) => {
+    const customerId = req.user.id;
+    const { bookingCode } = req.params;
+    const { reason } = req.body;
+
+    const data = await bookingService.cancelBooking(customerId, bookingCode, reason);
+
+    return successResponse(res, 200, 'Booking cancelled successfully', data);
 });
 
 module.exports = {
     createBooking,
+    getMyBookings,
+    getBookingDetail,
     getBookingStatus,
     getBookingPayment,
-    getBookingPaymentStatus,
-    getBookingDetail,
-    getBookingTickets
+    cancelBooking
 };

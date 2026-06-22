@@ -7,6 +7,9 @@ const profileRoutes = require('./profile.routes');
 const favouriteRoutes = require('./favourite.routes');
 const feedbackRoutes = require('./feedback.routes');
 const reportRoutes = require('./report.routes')
+const bookingRoutes = require('./booking.routes')
+const tripRoutes = require('./trip.routes');
+
 
 const router = express.Router();
 

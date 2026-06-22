@@ -1,67 +1,20 @@
 const express = require('express');
-const bookingController = require('../../controllers/customer/customerBooking.controller');
+
 const authenticate = require('../../middlewares/auth.middleware');
-const { restrictTo } = require('../../middlewares/role.middleware');
-const validate = require('../../middlewares/validate.middleware');
-const {
-    createBookingValidation,
-    bookingCodeParamValidation
-} = require('../../validations/booking.validation');
+const customerBookingController = require('../../controllers/customer/customerBooking.controller');
 
 const router = express.Router();
 
-router.post(
-    '/',
-    authenticate,
-    restrictTo('CUSTOMER'),
-    createBookingValidation,
-    validate,
-    bookingController.createBooking
-);
+router.post('/', authenticate, customerBookingController.createBooking);
 
-router.get(
-    '/:bookingCode/payment',
-    authenticate,
-    restrictTo('CUSTOMER'),
-    bookingCodeParamValidation,
-    validate,
-    bookingController.getBookingPayment
-);
+router.get('/', authenticate, customerBookingController.getMyBookings);
 
-router.get(
-    '/:bookingCode/payment-status',
-    authenticate,
-    restrictTo('CUSTOMER'),
-    bookingCodeParamValidation,
-    validate,
-    bookingController.getBookingPaymentStatus
-);
+router.get('/:bookingCode/status', authenticate, customerBookingController.getBookingStatus);
 
-router.get(
-    '/:bookingCode/status',
-    authenticate,
-    restrictTo('CUSTOMER'),
-    bookingCodeParamValidation,
-    validate,
-    bookingController.getBookingStatus
-);
+router.get('/:bookingCode/payment', authenticate, customerBookingController.getBookingPayment);
 
-router.get(
-    '/:bookingCode/tickets',
-    authenticate,
-    restrictTo('CUSTOMER'),
-    bookingCodeParamValidation,
-    validate,
-    bookingController.getBookingTickets
-);
+router.post('/:bookingCode/cancel', authenticate, customerBookingController.cancelBooking);
 
-router.get(
-    '/:bookingCode',
-    authenticate,
-    restrictTo('CUSTOMER'),
-    bookingCodeParamValidation,
-    validate,
-    bookingController.getBookingDetail
-);
+router.get('/:bookingCode', authenticate, customerBookingController.getBookingDetail);
 
 module.exports = router;
