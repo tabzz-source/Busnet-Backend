@@ -19,7 +19,7 @@ const registerRules = [
     body('password')
         .notEmpty().withMessage('Password is required')
         .isLength({ min: 7, max: 50 }).withMessage('Password must be over 6 characters')
-        .matches(/^[A-Z]/).withMessage('First letter must be capitalized')
+        .matches(/[A-Z]/).withMessage('Password must contain at least one uppercase letter')
         .matches(/\d/).withMessage('Password must contain at least one number')
         .matches(/[!@#$%^&*(),.?":{}|<>_+\-=\[\]\\';]/).withMessage('Password must contain at least one special character'),
 
@@ -130,7 +130,7 @@ const resetPasswordRules = [
     body('newPassword')
         .notEmpty().withMessage('New password is required')
         .isLength({ min: 7, max: 50 }).withMessage('New password must be over 6 characters')
-        .matches(/^[A-Z]/).withMessage('First letter of new password must be capitalized')
+        .matches(/[A-Z]/).withMessage('New password must contain at least one uppercase letter')
         .matches(/\d/).withMessage('New password must contain at least one number')
         .matches(/[!@#$%^&*(),.?":{}|<>_+\-=\[\]\\';]/).withMessage('New password must contain at least one special character')
 ];
@@ -144,7 +144,7 @@ const changePasswordRules = [
     body('newPassword')
         .notEmpty().withMessage('New password is required')
         .isLength({ min: 7, max: 50 }).withMessage('New password must be over 6 characters')
-        .matches(/^[A-Z]/).withMessage('First letter of new password must be capitalized')
+        .matches(/[A-Z]/).withMessage('New password must contain at least one uppercase letter')
         .matches(/\d/).withMessage('New password must contain at least one number')
         .matches(/[!@#$%^&*(),.?":{}|<>_+\-=\[\]\\';]/).withMessage('New password must contain at least one special character')
 ];
@@ -195,6 +195,91 @@ const validateResetPassword = (req, res, next) => runValidation(req, res, next, 
 const validateChangePassword = (req, res, next) => runValidation(req, res, next, changePasswordRules);
 const validateLogin = (req, res, next) => runValidation(req, res, next, loginRules);
 
+const registerOperatorRules = [
+    body('email')
+        .trim()
+        .notEmpty().withMessage('Email is required')
+        .isEmail().withMessage('Invalid email format')
+        .normalizeEmail(),
+
+    body('password')
+        .notEmpty().withMessage('Password is required')
+        .isLength({ min: 7, max: 50 }).withMessage('Password must be over 6 characters')
+        .matches(/[A-Z]/).withMessage('Password must contain at least one uppercase letter')
+        .matches(/\d/).withMessage('Password must contain at least one number')
+        .matches(/[!@#$%^&*(),.?":{}|<>_+\-=\[\]\\';]/).withMessage('Password must contain at least one special character'),
+
+    body('fullName')
+        .trim()
+        .notEmpty().withMessage('Representative name is required')
+        .isLength({ min: 2, max: 100 }).withMessage('Representative name must be between 2 and 100 characters'),
+
+    body('phone')
+        .trim()
+        .notEmpty().withMessage('Phone number is required')
+        .matches(/^0\d{9}$/).withMessage('Phone must be exactly 10 digits and start with 0'),
+
+    body('operatorName')
+        .trim()
+        .notEmpty().withMessage('Operator name is required')
+        .isLength({ min: 2, max: 100 }).withMessage('Operator name must be between 2 and 100 characters'),
+
+    body('taxCode')
+        .trim()
+        .notEmpty().withMessage('Tax code is required'),
+
+    body('bankName')
+        .trim()
+        .notEmpty().withMessage('Bank name is required'),
+
+    body('bankNumber')
+        .trim()
+        .notEmpty().withMessage('Bank account number is required'),
+
+    body('bankAccountName')
+        .trim()
+        .notEmpty().withMessage('Bank account holder name is required'),
+
+    body('sepayVa')
+        .trim()
+        .notEmpty().withMessage('SePay VA is required'),
+
+    body('sepayKey')
+        .trim()
+        .notEmpty().withMessage('SePay API Key is required'),
+
+    body('planId')
+        .trim()
+        .notEmpty().withMessage('Subscription plan is required')
+        .isMongoId().withMessage('Invalid subscription plan ID'),
+
+    body('operatorPhone')
+        .optional()
+        .trim(),
+
+    body('description')
+        .optional()
+        .trim(),
+
+    body('amenities')
+        .optional()
+        .isArray().withMessage('Amenities must be an array of strings'),
+
+    body('policies')
+        .optional()
+        .isObject().withMessage('Policies must be an object'),
+
+    body('profilePicture')
+        .optional()
+        .trim(),
+
+    body('coverImage')
+        .optional()
+        .trim()
+];
+
+const validateRegisterOperator = (req, res, next) => runValidation(req, res, next, registerOperatorRules);
+
 module.exports = {
     validateRegister,
     validateVerifyEmail,
@@ -202,7 +287,9 @@ module.exports = {
     validateVerifyResetCode,
     validateResetPassword,
     validateChangePassword,
-    validateLogin
+    validateLogin,
+    validateRegisterOperator
 };
+
 
 

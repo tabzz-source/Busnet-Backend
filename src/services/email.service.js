@@ -106,7 +106,58 @@ const sendPasswordResetEmail = async (email, code) => {
     return transporter.sendMail(mailOptions);
 };
 
+/**
+ * Send Welcome Email to Partner after successful activation/payment
+ * @param {string} email - Destination email
+ * @param {string} operatorName - Partner operator name
+ * @param {string} loginUrl - Partner dashboard login URL
+ */
+const sendPartnerWelcomeEmail = async (email, operatorName, loginUrl) => {
+    const mailOptions = {
+        from: process.env.EMAIL_FROM || '"BusNet" <no-reply@busnet.com>',
+        to: email,
+        subject: '[BusNet] Congratulations! Your Bus Operator Account Has Been Activated',
+        html: `
+            <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);">
+                <div style="text-align: center; border-bottom: 2px solid #10b981; padding-bottom: 20px; margin-bottom: 25px;">
+                    <h1 style="color: #064e3b; margin: 0; font-size: 28px; letter-spacing: 1px; font-weight: 800;">BusNet</h1>
+                    <p style="color: #047857; margin: 5px 0 0 0; font-size: 14px; font-weight: 500;">Smart Bus Operator Platform</p>
+                </div>
+                <div style="padding: 10px 10px;">
+                    <h2 style="color: #0f172a; margin-top: 0; font-size: 22px; font-weight: 700; text-align: center;">Congratulations!</h2>
+                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
+                        Dear <strong>${operatorName}</strong>,
+                    </p>
+                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
+                        Your partner account on the <strong>BusNet</strong> system has been successfully activated following the subscription payment verification.
+                    </p>
+                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
+                        You can now sign in to your operator dashboard to manage your bus fleet, configure routes, sell tickets online, and track business revenue.
+                    </p>
+                    <div style="text-align: center; margin: 35px 0;">
+                        <a href="${loginUrl}" style="display: inline-block; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: #ffffff; text-decoration: none; padding: 14px 35px; font-size: 16px; font-weight: bold; border-radius: 8px; box-shadow: 0 4px 10px rgba(16, 185, 129, 0.3); transition: all 0.3s ease;">
+                            SIGN IN TO OPERATOR DASHBOARD
+                        </a>
+                    </div>
+                    <p style="color: #64748b; font-size: 14px; line-height: 1.6; margin-top: 25px;">
+                        If the button above does not work, copy and paste this link into your browser: <br/>
+                        <a href="${loginUrl}" style="color: #10b981; word-break: break-all;">${loginUrl}</a>
+                    </p>
+                </div>
+                <div style="margin-top: 35px; padding-top: 20px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 12px; color: #94a3b8;">
+                    <p style="margin: 0 0 5px 0;">&copy; ${new Date().getFullYear()} BusNet Project. All rights reserved.</p>
+                    <p style="margin: 0;">This is an automated email. Please do not reply to this message.</p>
+                </div>
+            </div>
+        `
+    };
+
+    return transporter.sendMail(mailOptions);
+};
+
 module.exports = {
     sendVerificationEmail,
-    sendPasswordResetEmail
+    sendPasswordResetEmail,
+    sendPartnerWelcomeEmail
 };
+
