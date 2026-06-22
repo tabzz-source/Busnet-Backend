@@ -35,8 +35,18 @@ const verifyOTP = asyncHandler(async (req, res) => {
     return successResponse(res, 200, 'Email verified successfully', result);
 });
 
+/**
+ * POST /api/partner/auth/login
+ * Partner login controller
+ */
+const login = asyncHandler(async (req, res) => {
+    const result = await authService.loginPartner(req.body);
+    return successResponse(res, 200, 'Logged in successfully', result);
+});
+
 module.exports = {
     register,
     sendVerificationOTP,
-    verifyOTP
+    verifyOTP,
+    login
 };

@@ -1,9 +1,8 @@
-/**
- * Generate a random 6-digit verification code
- * @returns {string} 6-digit code as string (e.g. "482731")
- */
-const generateVerificationCode = () => {
-    return Math.floor(100000 + Math.random() * 900000).toString();
+const crypto = require('crypto');
+
+const generateCode = (length = 6) => {
+    const max = 10 ** length;
+    return crypto.randomInt(0, max).toString().padStart(length, '0');
 };
 
-module.exports = generateVerificationCode;
+module.exports = generateCode;

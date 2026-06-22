@@ -1,8 +1,11 @@
 const bcrypt = require('bcryptjs');
 const Account = require('../models/Account');
+const Admin = require('../models/Admin');
 const CodeVerification = require('../models/CodeVerification');
 const generateToken = require('../utils/generateToken');
 const generateVerificationCode = require('../utils/generateCode');
+const { addMinutes } = require('../utils/time');
+const { CODE_VERIFICATION_TYPE } = require('../constants/statuses');
 const AppError = require('../utils/AppError');
 const { verifyGoogleToken } = require('./googleAuth.service');
 const emailService = require('./email.service');
@@ -270,6 +273,65 @@ const loginGoogleCustomer = async (idToken) => {
     }
 
     // Step 4: Generate JWT token
+    const token = generateToken({
+        accountId: account._id,
+        role: account.role
+    });
+
+    return {
+        token,
+        account: {
+            _id: account._id,
+            username: account.username,
+            email: account.email,
+            phone: account.phone,
+            fullName: account.fullName,
+            role: account.role,
+            status: account.status,
+            profilePicture: account.profilePicture
+        }
+    };
+};
+
+const loginPartner = async ({ identifier, password }) => {
+    if (!identifier || !password) {
+        throw new Error('Please enter email/phone number and password');
+    }
+
+    const account = await Account.findOne({
+        $or: [
+            { email: identifier.toLowerCase() },
+            { phone: identifier }
+        ],
+        role: 'PARTNER'
+    }).select('+passwordHash');
+
+    if (!account) {
+        throw new Error('Incorrect account or password');
+    }
+
+    if (account.status === 'DELETED') {
+        throw new Error('This account has been deleted');
+    }
+
+    if (account.status === 'BANNED') {
+        throw new Error('This account has been banned');
+    }
+
+    if (account.status === 'PENDING_APPROVAL') {
+        throw new Error('Your account is pending approval from admin');
+    }
+
+    if (account.status !== 'ACTIVE') {
+        throw new Error('This account has not been activated');
+    }
+
+    const isMatch = await bcrypt.compare(password, account.passwordHash);
+
+    if (!isMatch) {
+        throw new Error('Incorrect account or password');
+    }
+
     const token = generateToken({
         accountId: account._id,
         role: account.role
@@ -774,6 +836,396 @@ const verifyPartnerOTP = async (email, code) => {
     return { success: true, message: 'Email verified successfully' };
 };
 
+// ============================
+// ADMIN: LOGIN
+// ============================
+
+const loginAdmin = async ({ email, password }) => {
+    if (!email || !password) {
+        throw new Error('Please enter email and password');
+    }
+
+    const admin = await Admin.findOne({
+        email: email.toLowerCase()
+    }).select('+passwordHash');
+
+    if (!admin) {
+        throw new Error('Incorrect account or password');
+    }
+
+    if (admin.status !== 'ACTIVE') {
+        throw new Error('This account has been disabled');
+    }
+
+    const isMatch = await bcrypt.compare(password, admin.passwordHash);
+
+    if (!isMatch) {
+        throw new Error('Incorrect account or password');
+    }
+
+    admin.lastLoginAt = new Date();
+    await admin.save();
+
+    const token = generateToken({ accountId: admin._id, role: admin.role });
+
+    return {
+        token,
+        admin: {
+            _id: admin._id,
+            username: admin.username,
+            email: admin.email,
+            fullName: admin.fullName,
+            role: admin.role,
+            status: admin.status,
+            avatar: admin.avatar,
+            lastLoginAt: admin.lastLoginAt
+        }
+    };
+};
+
+// ============================
+// ADMIN: VERIFY EMAIL
+// ============================
+
+const sendVerifyEmailAdmin = async (adminId) => {
+    const admin = await Admin.findById(adminId);
+
+    if (!admin) {
+        throw new Error('Admin not found');
+    }
+
+    if (admin.isEmailVerified) {
+        throw new Error('Email has already been verified');
+    }
+
+    const code = generateVerificationCode();
+    const codeHash = await bcrypt.hash(code, BCRYPT_SALT_ROUNDS);
+
+    await CodeVerification.create({
+        target: admin.email,
+        targetType: 'EMAIL',
+        type: CODE_VERIFICATION_TYPE.VERIFY_EMAIL,
+        codeHash,
+        expiredAt: addMinutes(new Date(), 10)
+    });
+
+    await emailService.sendVerificationEmail(admin.email, code);
+
+    return { message: 'Verification code has been sent to your email' };
+};
+
+const verifyEmailAdmin = async (adminId, code) => {
+    const admin = await Admin.findById(adminId);
+
+    if (!admin) {
+        throw new Error('Admin not found');
+    }
+
+    if (admin.isEmailVerified) {
+        throw new Error('Email has already been verified');
+    }
+
+    const record = await CodeVerification.findOne({
+        target: admin.email,
+        type: CODE_VERIFICATION_TYPE.VERIFY_EMAIL,
+        used: false,
+        expiredAt: { $gt: new Date() }
+    }).sort({ createdAt: -1 }).select('+codeHash');
+
+    if (!record) {
+        throw new Error('Verification code is invalid or has expired');
+    }
+
+    if (record.attemptCount >= record.maxAttempts) {
+        throw new Error('Too many attempts, please request a new code');
+    }
+
+    const isMatch = await bcrypt.compare(code, record.codeHash);
+
+    if (!isMatch) {
+        record.attemptCount += 1;
+        await record.save();
+        throw new Error('Invalid verification code');
+    }
+
+    record.used = true;
+    record.usedAt = new Date();
+    await record.save();
+
+    admin.isEmailVerified = true;
+    await admin.save();
+
+    return { message: 'Email verified successfully' };
+};
+
+// ============================
+// ADMIN: FORGOT / RESET PASSWORD
+// ============================
+
+const forgotPasswordAdmin = async (email) => {
+    if (!email) {
+        throw new Error('Please enter your email');
+    }
+
+    const admin = await Admin.findOne({ email: email.toLowerCase() });
+
+    if (!admin) {
+        throw new Error('No admin account found with this email');
+    }
+
+    const code = generateVerificationCode();
+    const codeHash = await bcrypt.hash(code, BCRYPT_SALT_ROUNDS);
+
+    await CodeVerification.create({
+        target: admin.email,
+        targetType: 'EMAIL',
+        type: CODE_VERIFICATION_TYPE.RESET_PASSWORD,
+        codeHash,
+        expiredAt: addMinutes(new Date(), 15)
+    });
+
+    await emailService.sendPasswordResetEmail(admin.email, code);
+
+    return { message: 'Password reset code has been sent to your email' };
+};
+
+const resetPasswordAdmin = async ({ email, code, newPassword }) => {
+    if (!email || !code || !newPassword) {
+        throw new Error('Please provide email, code and new password');
+    }
+
+    const admin = await Admin.findOne({ email: email.toLowerCase() });
+
+    if (!admin) {
+        throw new Error('No admin account found with this email');
+    }
+
+    const record = await CodeVerification.findOne({
+        target: admin.email,
+        type: CODE_VERIFICATION_TYPE.RESET_PASSWORD,
+        used: false,
+        expiredAt: { $gt: new Date() }
+    }).sort({ createdAt: -1 }).select('+codeHash');
+
+    if (!record) {
+        throw new Error('Reset code is invalid or has expired');
+    }
+
+    if (record.attemptCount >= record.maxAttempts) {
+        throw new Error('Too many attempts, please request a new code');
+    }
+
+    const isMatch = await bcrypt.compare(code, record.codeHash);
+
+    if (!isMatch) {
+        record.attemptCount += 1;
+        await record.save();
+        throw new Error('Invalid reset code');
+    }
+
+    record.used = true;
+    record.usedAt = new Date();
+    await record.save();
+
+    admin.passwordHash = await bcrypt.hash(newPassword, BCRYPT_SALT_ROUNDS);
+    await admin.save();
+
+    return { message: 'Password has been reset successfully' };
+};
+
+// ============================
+// PARTNER: FORGOT / RESET PASSWORD
+// ============================
+
+/**
+ * Send password reset code for partner
+ * @param {string} email
+ */
+const forgotPasswordPartner = async (email) => {
+    if (!email) {
+        throw new AppError('Email is required', 400);
+    }
+
+    const account = await Account.findOne({
+        email: email.toLowerCase(),
+        role: 'PARTNER',
+        deletedAt: null
+    });
+
+    if (!account) {
+        throw new AppError('Partner account with this email does not exist', 404);
+    }
+
+    if (account.status === 'BANNED' || account.status === 'DELETED') {
+        throw new AppError('This account is suspended or deleted', 403);
+    }
+
+    // Generate 6-digit OTP code
+    const verificationCode = generateVerificationCode();
+    const codeHash = await bcrypt.hash(verificationCode, BCRYPT_SALT_ROUNDS);
+    const expiredAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
+
+    // Store in CodeVerification
+    await CodeVerification.create({
+        accountId: account._id,
+        target: email.toLowerCase(),
+        targetType: 'EMAIL',
+        type: 'RESET_PASSWORD',
+        codeHash,
+        expiredAt
+    });
+
+    // Send email
+    emailService.sendPasswordResetEmail(email.toLowerCase(), verificationCode)
+        .catch(err => console.error('Failed to send password reset email:', err));
+
+    return { message: 'Password reset code has been sent to your email' };
+};
+
+/**
+ * Verify reset code for partner
+ * @param {string} email
+ * @param {string} code
+ * @returns {Promise<boolean>}
+ */
+const verifyResetCodePartner = async (email, code) => {
+    if (!email || !code) {
+        throw new AppError('Email and code are required', 400);
+    }
+
+    const account = await Account.findOne({
+        email: email.toLowerCase(),
+        role: 'PARTNER',
+        deletedAt: null
+    });
+
+    if (!account) {
+        throw new AppError('Partner account with this email does not exist', 404);
+    }
+
+    const verification = await CodeVerification.findOne({
+        accountId: account._id,
+        target: email.toLowerCase(),
+        targetType: 'EMAIL',
+        type: 'RESET_PASSWORD',
+        used: false,
+        expiredAt: { $gt: new Date() }
+    }).sort({ createdAt: -1 }).select('+codeHash');
+
+    if (!verification) {
+        throw new AppError('Invalid or expired verification code', 400);
+    }
+
+    if (verification.attemptCount >= verification.maxAttempts) {
+        throw new AppError('Too many failed attempts. Please request a new code', 400);
+    }
+
+    const isMatch = await bcrypt.compare(code, verification.codeHash);
+    if (!isMatch) {
+        verification.attemptCount += 1;
+        await verification.save();
+        const remainingAttempts = verification.maxAttempts - verification.attemptCount;
+        throw new AppError(`Incorrect code. ${remainingAttempts} attempts remaining`, 400);
+    }
+
+    return true;
+};
+
+/**
+ * Reset password for partner using verification code
+ * @param {string} email
+ * @param {string} code
+ * @param {string} newPassword
+ */
+const resetPasswordPartner = async (email, code, newPassword) => {
+    if (!email || !code || !newPassword) {
+        throw new AppError('Email, code, and new password are required', 400);
+    }
+
+    if (newPassword.length < 6) {
+        throw new AppError('Password must be at least 6 characters', 400);
+    }
+
+    const account = await Account.findOne({
+        email: email.toLowerCase(),
+        role: 'PARTNER',
+        deletedAt: null
+    });
+
+    if (!account) {
+        throw new AppError('Partner account not found', 404);
+    }
+
+    // 1. Find verification code
+    const verification = await CodeVerification.findOne({
+        accountId: account._id,
+        target: email.toLowerCase(),
+        targetType: 'EMAIL',
+        type: 'RESET_PASSWORD',
+        used: false,
+        expiredAt: { $gt: new Date() }
+    }).sort({ createdAt: -1 }).select('+codeHash');
+
+    if (!verification) {
+        throw new AppError('Invalid or expired verification code', 400);
+    }
+
+    if (verification.attemptCount >= verification.maxAttempts) {
+        throw new AppError('Too many failed attempts. Please request a new code', 400);
+    }
+
+    // 2. Verify code
+    const isMatch = await bcrypt.compare(code, verification.codeHash);
+    if (!isMatch) {
+        verification.attemptCount += 1;
+        await verification.save();
+        const remainingAttempts = verification.maxAttempts - verification.attemptCount;
+        throw new AppError(`Incorrect code. ${remainingAttempts} attempts remaining`, 400);
+    }
+
+    // 3. Hash new password
+    const passwordHash = await bcrypt.hash(newPassword, BCRYPT_SALT_ROUNDS);
+
+    // 4. Update account password
+    const updatedAccount = await Account.findOneAndUpdate(
+        { _id: account._id, role: 'PARTNER', deletedAt: null },
+        { passwordHash },
+        { returnDocument: 'after' }
+    );
+
+    if (!updatedAccount) {
+        throw new AppError('Partner account not found', 404);
+    }
+
+    // 5. Mark code as used
+    verification.used = true;
+    verification.usedAt = new Date();
+    await verification.save();
+
+    return { message: 'Password has been reset successfully' };
+};
+
+/**
+ * Resend password reset code for partner
+ * @param {string} email
+ */
+const resendResetCodePartner = async (email) => {
+    if (!email) {
+        throw new AppError('Email is required', 400);
+    }
+
+    // Delete old reset codes
+    await CodeVerification.deleteMany({
+        target: email.toLowerCase(),
+        targetType: 'EMAIL',
+        type: 'RESET_PASSWORD',
+        used: false
+    });
+
+    // Send new reset code
+    return await forgotPasswordPartner(email);
+};
+
 module.exports = {
     registerCustomer,
     loginCustomer,
@@ -784,5 +1236,15 @@ module.exports = {
     resetPassword,
     registerOperator,
     sendPartnerVerificationOTP,
-    verifyPartnerOTP
+    verifyPartnerOTP,
+    loginPartner,
+    loginAdmin,
+    sendVerifyEmailAdmin,
+    verifyEmailAdmin,
+    forgotPasswordAdmin,
+    resetPasswordAdmin,
+    forgotPasswordPartner,
+    verifyResetCodePartner,
+    resetPasswordPartner,
+    resendResetCodePartner
 };

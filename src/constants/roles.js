@@ -1,7 +1,5 @@
-const ROLES = Object.freeze({
+module.exports = {
     CUSTOMER: 'CUSTOMER',
     PARTNER: 'PARTNER',
     ADMIN: 'ADMIN'
-});
-
-module.exports = ROLES;
+};

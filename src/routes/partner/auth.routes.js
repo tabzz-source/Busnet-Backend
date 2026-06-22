@@ -13,4 +13,7 @@ router.post('/send-verification-otp', partnerAuthController.sendVerificationOTP)
 // POST /api/partner/auth/verify-otp
 router.post('/verify-otp', partnerAuthController.verifyOTP);
 
+// POST /api/partner/auth/login
+router.post('/login', partnerAuthController.login);
+
 module.exports = router;
