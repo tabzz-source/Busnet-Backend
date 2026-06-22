@@ -4,11 +4,7 @@ module.exports = {
         ACTIVE: 'ACTIVE',
         DELETED: 'DELETED',
         BANNED: 'BANNED',
-        PENDING_APPROVAL: 'PENDING_APPROVAL'
-    },
-
-    ADMIN_STATUS: {
-        ACTIVE: 'ACTIVE',
+        PENDING_APPROVAL: 'PENDING_APPROVAL',
         DISABLED: 'DISABLED'
     },
 

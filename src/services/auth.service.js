@@ -1,6 +1,5 @@
 const bcrypt = require('bcryptjs');
 const Account = require('../models/Account');
-const Admin = require('../models/Admin');
 const CodeVerification = require('../models/CodeVerification');
 const generateToken = require('../utils/generateToken');
 const generateVerificationCode = require('../utils/generateCode');
@@ -856,8 +855,9 @@ const loginAdmin = async ({ email, password }) => {
         throw new Error('Please enter email and password');
     }
 
-    const admin = await Admin.findOne({
-        email: email.toLowerCase()
+    const admin = await Account.findOne({
+        email: email.toLowerCase(),
+        role: 'ADMIN'
     }).select('+passwordHash');
 
     if (!admin) {
@@ -888,7 +888,7 @@ const loginAdmin = async ({ email, password }) => {
             fullName: admin.fullName,
             role: admin.role,
             status: admin.status,
-            avatar: admin.avatar,
+            avatar: admin.profilePicture,
             lastLoginAt: admin.lastLoginAt
         }
     };
@@ -899,7 +899,7 @@ const loginAdmin = async ({ email, password }) => {
 // ============================
 
 const sendVerifyEmailAdmin = async (adminId) => {
-    const admin = await Admin.findById(adminId);
+    const admin = await Account.findOne({ _id: adminId, role: 'ADMIN' });
 
     if (!admin) {
         throw new Error('Admin not found');
@@ -926,7 +926,7 @@ const sendVerifyEmailAdmin = async (adminId) => {
 };
 
 const verifyEmailAdmin = async (adminId, code) => {
-    const admin = await Admin.findById(adminId);
+    const admin = await Account.findOne({ _id: adminId, role: 'ADMIN' });
 
     if (!admin) {
         throw new Error('Admin not found');
@@ -978,7 +978,7 @@ const forgotPasswordAdmin = async (email) => {
         throw new Error('Please enter your email');
     }
 
-    const admin = await Admin.findOne({ email: email.toLowerCase() });
+    const admin = await Account.findOne({ email: email.toLowerCase(), role: 'ADMIN' });
 
     if (!admin) {
         throw new Error('No admin account found with this email');
@@ -1005,7 +1005,7 @@ const resetPasswordAdmin = async ({ email, code, newPassword }) => {
         throw new Error('Please provide email, code and new password');
     }
 
-    const admin = await Admin.findOne({ email: email.toLowerCase() });
+    const admin = await Account.findOne({ email: email.toLowerCase(), role: 'ADMIN' });
 
     if (!admin) {
         throw new Error('No admin account found with this email');
