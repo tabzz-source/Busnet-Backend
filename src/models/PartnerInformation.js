@@ -67,7 +67,9 @@ const partnerInformationSchema = new mongoose.Schema(
 
         sepayVa: {
             type: String,
-            trim: true
+            trim: true,
+            unique: true,
+            sparse: true
         },
 
         sepayKeyEncrypted: {

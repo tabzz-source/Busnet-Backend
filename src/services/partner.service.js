@@ -187,114 +187,6 @@ const _parseArrayField = (value, fieldName) => {
     if (Array.isArray(value)) {
         return value.map((item) => String(item).trim()).filter(Boolean);
     }
-
-    async updatePartnerProfileByAccountId(accountId, data, files = {}) {
-        if (!accountId) {
-            throw new AppError('Account id is required', 400);
-        }
-
-        const account = await Account.findOne({ _id: accountId, role: PARTNER, deletedAt: null });
-
-        if (!account) {
-            throw new AppError('Partner account not found', 404);
-        }
-
-        const profile = await PartnerInformation.findOne({ accountId });
-
-        if (!profile) {
-            throw new AppError('Partner profile not found', 404);
-        }
-
-        const hasProfilePicture = Boolean(files.profilePicture?.[0]);
-        const hasCoverImage = Boolean(files.coverImage?.[0]);
-        const updatableFields = [
-            'fullName',
-            'phone',
-            'gender',
-            'dob',
-            'operatorName',
-            'operatorPhone',
-            'description',
-            'amenities',
-            'policies',
-            'bankName',
-            'bankAccountName',
-            'bankNumber',
-            'bankBranch',
-            'taxCode'
-        ];
-        const hasBodyUpdates = updatableFields.some((field) => data[field] !== undefined);
-
-        if (!hasBodyUpdates && !hasProfilePicture && !hasCoverImage) {
-            throw new AppError('No profile data provided for update', 400);
-        }
-
-        if (data.phone !== undefined && data.phone !== account.phone) {
-            const existingPhone = await Account.findOne({
-                _id: { $ne: account._id },
-                phone: data.phone,
-                deletedAt: null
-            });
-
-            if (existingPhone) {
-                throw new AppError('This phone number is already registered', 409);
-            }
-
-            account.phone = data.phone;
-        }
-
-        if (data.fullName !== undefined) {
-            account.fullName = data.fullName.trim();
-        }
-
-        if (data.gender !== undefined) {
-            account.gender = data.gender;
-        }
-
-        if (data.dob !== undefined) {
-            account.dob = data.dob ? new Date(data.dob) : null;
-        }
-
-        if (data.operatorName !== undefined) {
-            profile.operatorName = data.operatorName.trim();
-        }
-
-        if (data.operatorPhone !== undefined) {
-            profile.operatorPhone = data.operatorPhone;
-        }
-
-        if (data.description !== undefined) {
-            profile.description = data.description;
-        }
-
-        if (data.amenities !== undefined) {
-            profile.amenities = this._parseArrayField(data.amenities, 'amenities');
-        }
-
-        if (data.policies !== undefined) {
-            profile.policies = this._parseObjectField(data.policies, 'policies');
-        }
-
-        ['bankName', 'bankAccountName', 'bankNumber', 'bankBranch', 'taxCode'].forEach((field) => {
-            if (data[field] !== undefined) {
-                profile[field] = data[field] || null;
-            }
-        });
-
-        if (hasProfilePicture) {
-            const uploaded = await uploadToCloudinary(files.profilePicture[0].buffer, PARTNER_PROFILE_FOLDER);
-            profile.profilePicture = uploaded.url;
-            account.profilePicture = uploaded.url;
-        }
-
-        if (hasCoverImage) {
-            const uploaded = await uploadToCloudinary(files.coverImage[0].buffer, PARTNER_COVER_FOLDER);
-            profile.coverImage = uploaded.url;
-        }
-
-        await Promise.all([account.save(), profile.save()]);
-
-        return this.getPartnerProfileByAccountId(accountId);
     if (typeof value !== 'string') {
         throw new AppError(`${fieldName} must be an array`, 400);
     }
@@ -340,63 +232,114 @@ const getPartnerProfileByAccountId = async (accountId) => {
     return _formatPartnerProfile(profile);
 };
 
-// const updatePartnerProfileByAccountId = async (accountId, data, files = {}) => {
-//     if (!accountId) {
-//         throw new AppError('Account id is required', 400);
-//     }
+const updatePartnerProfileByAccountId = async (accountId, data, files = {}) => {
+    if (!accountId) {
+        throw new AppError('Account id is required', 400);
+    }
 
-//     const account = await Account.findOne({ _id: accountId, role: PARTNER, deletedAt: null });
-//     if (!account) throw new AppError('Partner account not found', 404);
+    const account = await Account.findOne({ _id: accountId, role: PARTNER, deletedAt: null });
 
-//     const profile = await PartnerInformation.findOne({ accountId });
-//     if (!profile) throw new AppError('Partner profile not found', 404);
+    if (!account) {
+        throw new AppError('Partner account not found', 404);
+    }
 
-//     const hasProfilePicture = Boolean(files.profilePicture?.[0]);
-//     const hasCoverImage = Boolean(files.coverImage?.[0]);
-//     const updatableFields = [
-//         'fullName', 'phone', 'gender', 'dob',
-//         'operatorName', 'operatorPhone', 'description',
-//         'amenities', 'policies',
-//         'bankName', 'bankAccountName', 'bankNumber', 'bankBranch', 'taxCode'
-//     ];
-//     const hasBodyUpdates = updatableFields.some((field) => data[field] !== undefined);
+    const profile = await PartnerInformation.findOne({ accountId });
 
-//     if (!hasBodyUpdates && !hasProfilePicture && !hasCoverImage) {
-//         throw new AppError('No profile data provided for update', 400);
-//     }
+    if (!profile) {
+        throw new AppError('Partner profile not found', 404);
+    }
 
-//     if (data.phone !== undefined && data.phone !== account.phone) {
-//         const existingPhone = await Account.findOne({ _id: { $ne: account._id }, phone: data.phone, deletedAt: null });
-//         if (existingPhone) throw new AppError('This phone number is already registered', 409);
-//         account.phone = data.phone;
-//     }
+    const hasProfilePicture = Boolean(files.profilePicture?.[0]);
+    const hasCoverImage = Boolean(files.coverImage?.[0]);
+    const updatableFields = [
+        'fullName',
+        'phone',
+        'gender',
+        'dob',
+        'operatorName',
+        'operatorPhone',
+        'description',
+        'amenities',
+        'policies',
+        'bankName',
+        'bankAccountName',
+        'bankNumber',
+        'bankBranch',
+        'taxCode'
+    ];
+    const hasBodyUpdates = updatableFields.some((field) => data[field] !== undefined);
 
-//     if (data.fullName !== undefined) account.fullName = data.fullName.trim();
-//     if (data.gender !== undefined) account.gender = data.gender;
-//     if (data.dob !== undefined) account.dob = data.dob ? new Date(data.dob) : null;
-//     if (data.operatorName !== undefined) profile.operatorName = data.operatorName.trim();
-//     if (data.operatorPhone !== undefined) profile.operatorPhone = data.operatorPhone;
-//     if (data.description !== undefined) profile.description = data.description;
-//     if (data.amenities !== undefined) profile.amenities = _parseArrayField(data.amenities, 'amenities');
-//     if (data.policies !== undefined) profile.policies = _parseObjectField(data.policies, 'policies');
+    if (!hasBodyUpdates && !hasProfilePicture && !hasCoverImage) {
+        throw new AppError('No profile data provided for update', 400);
+    }
 
-//     ['bankName', 'bankAccountName', 'bankNumber', 'bankBranch', 'taxCode'].forEach((field) => {
-//         if (data[field] !== undefined) profile[field] = data[field] || null;
-//     });
+    if (data.phone !== undefined && data.phone !== account.phone) {
+        const existingPhone = await Account.findOne({
+            _id: { $ne: account._id },
+            phone: data.phone,
+            deletedAt: null
+        });
 
-//     if (hasProfilePicture) {
-//         const uploaded = await uploadToCloudinary(files.profilePicture[0].buffer, PARTNER_PROFILE_FOLDER);
-//         profile.profilePicture = uploaded.url;
-//     }
-//     if (hasCoverImage) {
-//         const uploaded = await uploadToCloudinary(files.coverImage[0].buffer, PARTNER_COVER_FOLDER);
-//         profile.coverImage = uploaded.url;
-//     }
+        if (existingPhone) {
+            throw new AppError('This phone number is already registered', 409);
+        }
 
-//     await Promise.all([account.save(), profile.save()]);
+        account.phone = data.phone;
+    }
 
-//     return getPartnerProfileByAccountId(accountId);
-// };
+    if (data.fullName !== undefined) {
+        account.fullName = data.fullName.trim();
+    }
+
+    if (data.gender !== undefined) {
+        account.gender = data.gender;
+    }
+
+    if (data.dob !== undefined) {
+        account.dob = data.dob ? new Date(data.dob) : null;
+    }
+
+    if (data.operatorName !== undefined) {
+        profile.operatorName = data.operatorName.trim();
+    }
+
+    if (data.operatorPhone !== undefined) {
+        profile.operatorPhone = data.operatorPhone;
+    }
+
+    if (data.description !== undefined) {
+        profile.description = data.description;
+    }
+
+    if (data.amenities !== undefined) {
+        profile.amenities = _parseArrayField(data.amenities, 'amenities');
+    }
+
+    if (data.policies !== undefined) {
+        profile.policies = _parseObjectField(data.policies, 'policies');
+    }
+
+    ['bankName', 'bankAccountName', 'bankNumber', 'bankBranch', 'taxCode'].forEach((field) => {
+        if (data[field] !== undefined) {
+            profile[field] = data[field] || null;
+        }
+    });
+
+    if (hasProfilePicture) {
+        const uploaded = await uploadToCloudinary(files.profilePicture[0].buffer, PARTNER_PROFILE_FOLDER);
+        profile.profilePicture = uploaded.url;
+        account.profilePicture = uploaded.url;
+    }
+
+    if (hasCoverImage) {
+        const uploaded = await uploadToCloudinary(files.coverImage[0].buffer, PARTNER_COVER_FOLDER);
+        profile.coverImage = uploaded.url;
+    }
+
+    await Promise.all([account.save(), profile.save()]);
+
+    return getPartnerProfileByAccountId(accountId);
+};
 
 module.exports = {
     getPartners,

@@ -430,9 +430,9 @@ const verifyEmail = async (email, code) => {
         // Fallback for older registers where Account was created on register step
         account = await Account.findOneAndUpdate(
             { email: email.toLowerCase(), deletedAt: null },
-            { 
-                status: 'ACTIVE', 
-                isEmailVerified: true 
+            {
+                status: 'ACTIVE',
+                isEmailVerified: true
             },
             { returnDocument: 'after' }
         );
@@ -636,6 +636,204 @@ const resetPassword = async (email, code, newPassword) => {
     await verification.save();
 
     return { message: 'Password has been reset successfully.' };
+};
+
+/**
+ * Register a new partner/operator account
+ * @param {object} data - Operator registration data
+ * @returns {object} { account, partnerInfo, transaction }
+ */
+const registerOperator = async (data) => {
+    const SubscriptionPlan = require('../models/SubscriptionPlan');
+    const Transaction = require('../models/Transaction');
+    const sepayCrypto = require('../utils/sepayCrypto');
+
+    const {
+        email, password, fullName, phone,
+        operatorName, taxCode,
+        bankName, bankNumber, bankAccountName, bankBranch,
+        sepayVa, sepayKey, planId,
+        operatorPhone, description, amenities, policies, profilePicture, coverImage
+    } = data;
+
+    // 1. Verify plan exists and is active
+    const plan = await SubscriptionPlan.findOne({ _id: planId, status: 'ACTIVE' });
+    if (!plan) {
+        throw new AppError('Subscription plan does not exist or is inactive', 404);
+    }
+
+    // 2. Validate email, phone duplication in Account
+    const existingEmail = await Account.findOne({ email: email.toLowerCase(), deletedAt: null });
+    if (existingEmail) {
+        throw new AppError('This email is already registered', 409);
+    }
+
+    const existingPhone = await Account.findOne({ phone, deletedAt: null });
+    if (existingPhone) {
+        throw new AppError('This phone number is already registered', 409);
+    }
+
+    // 3. Validate sepayVa uniqueness in PartnerInformation
+    const PartnerInformation = require('../models/PartnerInformation');
+    const existingPartnerInfo = await PartnerInformation.findOne({ sepayVa });
+    if (existingPartnerInfo) {
+        const associatedAccount = await Account.findOne({ _id: existingPartnerInfo.accountId, deletedAt: null });
+        if (associatedAccount) {
+            throw new AppError('This SePay Virtual Account (VA) is already registered by another partner', 409);
+        }
+    }
+
+    // Hash password and encrypt sepayKey
+    const passwordHash = await bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
+    const encryptedSepayKey = sepayCrypto.encrypt(sepayKey);
+
+    // Calculate subscription amount
+    const amount = Math.round(plan.price - (plan.price * plan.discount / 100));
+
+    // Create Transaction (status: PENDING, type: SUBSCRIPTION_PAYMENT)
+    // We store all partner registration details inside transaction.metadata to defer write until paid
+    const transaction = await Transaction.create({
+        partnerId: null,
+        subscriptionId: null,
+        transactionType: 'SUBSCRIPTION_PAYMENT',
+        amount,
+        currency: 'VND',
+        status: 'PENDING',
+        gateway: 'SEPAY',
+        description: `Subscription package payment`,
+        metadata: {
+            email: email.toLowerCase(),
+            passwordHash,
+            fullName,
+            phone,
+            operatorName,
+            taxCode,
+            bankName,
+            bankNumber,
+            bankAccountName,
+            bankBranch: bankBranch || '',
+            sepayVa,
+            sepayKeyEncrypted: encryptedSepayKey,
+            planId: plan._id,
+            operatorPhone: operatorPhone || phone,
+            description: description || '',
+            amenities: amenities || [],
+            policies: policies || {},
+            profilePicture: profilePicture || null,
+            coverImage: coverImage || null
+        }
+    });
+
+    // Generate reference code for transaction
+    transaction.code = `BUSNET_SUB_${transaction._id}`;
+    transaction.content = `BUSNET SUB ${transaction._id}`;
+    await transaction.save();
+
+    // Prepare VietQR payment QR URL
+    const adminVa = process.env.ADMIN_SEPAY_VA || '7411208853';
+    const adminBank = process.env.ADMIN_SEPAY_BANK || 'BIDV';
+    const qrUrl = `https://qr.sepay.vn/img?acc=${adminVa}&bank=${adminBank}&amount=${transaction.amount}&des=${transaction.content}`;
+
+    return {
+        account: {
+            _id: null,
+            email: email.toLowerCase(),
+            phone,
+            fullName,
+            role: 'PARTNER',
+            status: 'UNVERIFIED'
+        },
+        partnerInfo: {
+            _id: null,
+            operatorName,
+            taxCode,
+            sepayVa
+        },
+        transaction: {
+            _id: transaction._id,
+            amount: transaction.amount,
+            content: transaction.content,
+            status: transaction.status,
+            qrUrl,
+            adminBank,
+            adminVa
+        }
+    };
+};
+
+/**
+ * Send OTP for partner email verification
+ */
+const sendPartnerVerificationOTP = async (email) => {
+    if (!email) {
+        throw new AppError('Email is required', 400);
+    }
+    
+    // Check if email already registered as a non-deleted account
+    const existing = await Account.findOne({ email: email.toLowerCase(), deletedAt: null });
+    if (existing) {
+        throw new AppError('This email is already registered', 409);
+    }
+
+    // Generate 6-digit OTP
+    const code = generateVerificationCode();
+    const codeHash = await bcrypt.hash(code, BCRYPT_SALT_ROUNDS);
+    const expiredAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+    // Delete existing verification codes for this email and type VERIFY_EMAIL
+    await CodeVerification.deleteMany({ target: email.toLowerCase(), targetType: 'EMAIL', type: 'VERIFY_EMAIL' });
+
+    await CodeVerification.create({
+        accountId: null,
+        target: email.toLowerCase(),
+        targetType: 'EMAIL',
+        type: 'VERIFY_EMAIL',
+        codeHash,
+        expiredAt
+    });
+
+    // Send email
+    await emailService.sendVerificationEmail(email.toLowerCase(), code);
+    
+    return { success: true, message: 'Verification code sent', ...(process.env.NODE_ENV === 'development' ? { code } : {}) };
+};
+
+/**
+ * Verify OTP for partner email verification
+ */
+const verifyPartnerOTP = async (email, code) => {
+    if (!email || !code) {
+        throw new AppError('Email and verification code are required', 400);
+    }
+
+    const verification = await CodeVerification.findOne({
+        target: email.toLowerCase(),
+        targetType: 'EMAIL',
+        type: 'VERIFY_EMAIL',
+        used: false,
+        expiredAt: { $gt: new Date() }
+    }).select('+codeHash');
+
+    if (!verification) {
+        throw new AppError('Invalid or expired verification code', 400);
+    }
+
+    if (verification.attemptCount >= verification.maxAttempts) {
+        throw new AppError('Too many failed attempts. Please request a new code.', 400);
+    }
+
+    const isMatch = await bcrypt.compare(code, verification.codeHash);
+    if (!isMatch) {
+        verification.attemptCount += 1;
+        await verification.save();
+        throw new AppError('Incorrect verification code', 400);
+    }
+
+    verification.used = true;
+    verification.usedAt = new Date();
+    await verification.save();
+
+    return { success: true, message: 'Email verified successfully' };
 };
 
 // ============================
@@ -1036,6 +1234,9 @@ module.exports = {
     forgotPassword,
     verifyResetCode,
     resetPassword,
+    registerOperator,
+    sendPartnerVerificationOTP,
+    verifyPartnerOTP,
     loginPartner,
     loginAdmin,
     sendVerifyEmailAdmin,
