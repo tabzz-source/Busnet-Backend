@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 const bcrypt = require('bcryptjs');
-const Admin = require('../models/Admin');
+const Account = require('../models/Account');
 
 dotenv.config();
 
@@ -9,7 +9,7 @@ const MOCK_ADMINS = [
   {
     username: 'admin',
     email: 'admin@busnet.vn',
-    password: 'Admin@123', // Clean plain text password to be hashed
+    password: 'Admin@123',
     fullName: 'BusNet Administrator',
     role: 'ADMIN',
     status: 'ACTIVE',
@@ -22,8 +22,8 @@ const seedAdmins = async () => {
     await mongoose.connect(process.env.MONGO_URI);
     console.log('✅ Connected to MongoDB successfully.');
 
-    console.log('ℹ Cleaning old admin accounts in admins...');
-    await Admin.deleteMany({});
+    console.log('ℹ Cleaning old admin accounts...');
+    await Account.deleteMany({ role: 'ADMIN' });
     console.log('✅ Cleaned old admins.');
 
     let insertedCount = 0;
@@ -39,7 +39,7 @@ const seedAdmins = async () => {
         isEmailVerified: adminData.isEmailVerified
       };
 
-      await Admin.create(adminToCreate);
+      await Account.create(adminToCreate);
       insertedCount++;
       console.log(`+ Seeded admin user: "${adminData.username}" with email: "${adminData.email}" and password: "${adminData.password}"`);
     }
