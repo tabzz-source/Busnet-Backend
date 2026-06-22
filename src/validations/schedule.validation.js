@@ -72,4 +72,82 @@ const createScheduleValidation = [
         .isString().withMessage('Operation notes must be a string')
 ];
 
-module.exports = { createScheduleValidation };
+const updateScheduleValidation = [
+    body('routeId')
+        .optional()
+        .isMongoId().withMessage('Invalid route ID'),
+
+    body('busId')
+        .optional()
+        .isMongoId().withMessage('Invalid bus ID'),
+
+    body('departureTime')
+        .optional()
+        .matches(/^(0[0-9]|1[0-9]|2[0-3]):[0-5][0-9]$/).withMessage('Departure time must be in HH:mm format'),
+
+    body('arrivalTime')
+        .optional()
+        .matches(/^(0[0-9]|1[0-9]|2[0-3]):[0-5][0-9]$/).withMessage('Arrival time must be in HH:mm format'),
+
+    body('basePrice')
+        .optional()
+        .isFloat({ min: 0 }).withMessage('Base price must be a positive number'),
+
+    body('recurrenceType')
+        .optional()
+        .isIn(['ONCE', 'DAILY', 'WEEKLY', 'MONTHLY', 'CUSTOM']).withMessage('Invalid recurrence type'),
+
+    body('recurrenceRule.startDate')
+        .optional()
+        .isISO8601().withMessage('Start date must be a valid date'),
+
+    body('recurrenceRule.endDate')
+        .optional({ nullable: true })
+        .isISO8601().withMessage('End date must be a valid date'),
+
+    body('recurrenceRule.daysOfWeek')
+        .optional()
+        .isArray().withMessage('Days of week must be an array'),
+
+    body('recurrenceRule.daysOfMonth')
+        .optional()
+        .isArray().withMessage('Days of month must be an array'),
+
+    body('pickupPoints')
+        .optional()
+        .isArray({ min: 1 }).withMessage('At least one pickup point is required'),
+
+    body('pickupPoints.*.name')
+        .optional()
+        .notEmpty().withMessage('Pickup point name is required'),
+
+    body('pickupPoints.*.address')
+        .optional()
+        .notEmpty().withMessage('Pickup point address is required'),
+
+    body('pickupPoints.*.time')
+        .optional()
+        .matches(/^(0[0-9]|1[0-9]|2[0-3]):[0-5][0-9]$/).withMessage('Pickup time must be in HH:mm format'),
+
+    body('dropoffPoints')
+        .optional()
+        .isArray({ min: 1 }).withMessage('At least one dropoff point is required'),
+
+    body('dropoffPoints.*.name')
+        .optional()
+        .notEmpty().withMessage('Dropoff point name is required'),
+
+    body('dropoffPoints.*.address')
+        .optional()
+        .notEmpty().withMessage('Dropoff point address is required'),
+
+    body('dropoffPoints.*.time')
+        .optional()
+        .matches(/^(0[0-9]|1[0-9]|2[0-3]):[0-5][0-9]$/).withMessage('Dropoff time must be in HH:mm format'),
+
+    body('operationNotes')
+        .optional()
+        .isString().withMessage('Operation notes must be a string')
+];
+
+module.exports = { createScheduleValidation, updateScheduleValidation };

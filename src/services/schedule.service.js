@@ -171,9 +171,138 @@ const getPartnerBuses = async (partnerId) => {
         .lean();
 };
 
+const getScheduleById = async (partnerId, scheduleId) => {
+    const schedule = await Schedule.findOne({ _id: scheduleId, partnerId, isActive: true })
+        .populate('routeId', 'routeName origin_provinceName destination_provinceName origin_province destination_province distanceKm estimatedDuration')
+        .populate('busId', 'busName licensePlate busType totalSeats amenities status')
+        .lean();
+
+    if (!schedule) {
+        throw new AppError('Schedule not found or does not belong to your account', 404);
+    }
+
+    const [pickupPoints, dropoffPoints] = await Promise.all([
+        SchedulePickupPoint.find({ scheduleId: schedule._id }).sort({ orderIndex: 1 }).lean(),
+        ScheduleDropoffPoint.find({ scheduleId: schedule._id }).sort({ orderIndex: 1 }).lean()
+    ]);
+
+    return { ...schedule, pickupPoints, dropoffPoints };
+};
+
+const updateSchedule = async (partnerId, scheduleId, data) => {
+    const schedule = await Schedule.findOne({ _id: scheduleId, partnerId, isActive: true });
+    if (!schedule) {
+        throw new AppError('Schedule not found or does not belong to your account', 404);
+    }
+
+    const {
+        routeId, busId, departureTime, arrivalTime,
+        basePrice, recurrenceType, recurrenceRule,
+        pickupPoints, dropoffPoints, operationNotes
+    } = data;
+
+    if (routeId && routeId !== schedule.routeId.toString()) {
+        const route = await Route.findOne({ _id: routeId, partnerId, isActive: true, deletedAt: null });
+        if (!route) throw new AppError('Route not found or does not belong to your account', 404);
+    }
+
+    if (busId && busId !== schedule.busId.toString()) {
+        const bus = await Bus.findOne({ _id: busId, partnerId, isActive: true });
+        if (!bus) throw new AppError('Bus not found or does not belong to your account', 404);
+    }
+
+    const checkRouteId = routeId || schedule.routeId;
+    const checkBusId = busId || schedule.busId;
+    const checkDepartureTime = departureTime || schedule.departureTime;
+
+    const duplicate = await Schedule.findOne({
+        _id: { $ne: scheduleId },
+        routeId: checkRouteId,
+        busId: checkBusId,
+        partnerId,
+        departureTime: checkDepartureTime,
+        isActive: true
+    });
+    if (duplicate) {
+        throw new AppError('A schedule with the same route, bus and departure time already exists', 409);
+    }
+
+    if (routeId) schedule.routeId = routeId;
+    if (busId) schedule.busId = busId;
+    if (departureTime) schedule.departureTime = departureTime;
+    if (arrivalTime) schedule.arrivalTime = arrivalTime;
+    if (basePrice !== undefined) schedule.basePrice = basePrice;
+    if (recurrenceType) schedule.recurrenceType = recurrenceType;
+    if (operationNotes !== undefined) schedule.operationNotes = operationNotes;
+
+    if (recurrenceRule) {
+        if (recurrenceRule.frequency) schedule.recurrenceRule.frequency = recurrenceRule.frequency;
+        if (recurrenceRule.interval) schedule.recurrenceRule.interval = recurrenceRule.interval;
+        if (recurrenceRule.daysOfWeek) schedule.recurrenceRule.daysOfWeek = recurrenceRule.daysOfWeek;
+        if (recurrenceRule.daysOfMonth) schedule.recurrenceRule.daysOfMonth = recurrenceRule.daysOfMonth;
+        if (recurrenceRule.startDate) schedule.recurrenceRule.startDate = new Date(recurrenceRule.startDate);
+        if (recurrenceRule.endDate !== undefined) schedule.recurrenceRule.endDate = recurrenceRule.endDate ? new Date(recurrenceRule.endDate) : null;
+    }
+
+    await schedule.save();
+
+    if (pickupPoints && pickupPoints.length > 0) {
+        await SchedulePickupPoint.deleteMany({ scheduleId });
+        const pickupDocs = pickupPoints.map((p, i) => ({
+            scheduleId,
+            name: p.name,
+            address: p.address,
+            province: p.province || null,
+            provinceName: p.provinceName || null,
+            district: p.district || null,
+            districtName: p.districtName || null,
+            time: p.time,
+            lat: p.lat || null,
+            lng: p.lng || null,
+            orderIndex: p.orderIndex ?? i
+        }));
+        await SchedulePickupPoint.insertMany(pickupDocs);
+    }
+
+    if (dropoffPoints && dropoffPoints.length > 0) {
+        await ScheduleDropoffPoint.deleteMany({ scheduleId });
+        const dropoffDocs = dropoffPoints.map((p, i) => ({
+            scheduleId,
+            name: p.name,
+            address: p.address,
+            province: p.province || null,
+            provinceName: p.provinceName || null,
+            district: p.district || null,
+            districtName: p.districtName || null,
+            time: p.time,
+            lat: p.lat || null,
+            lng: p.lng || null,
+            orderIndex: p.orderIndex ?? i
+        }));
+        await ScheduleDropoffPoint.insertMany(dropoffDocs);
+    }
+
+    return getScheduleById(partnerId, scheduleId);
+};
+
+const deleteSchedule = async (partnerId, scheduleId) => {
+    const schedule = await Schedule.findOne({ _id: scheduleId, partnerId, isActive: true });
+    if (!schedule) {
+        throw new AppError('Schedule not found or does not belong to your account', 404);
+    }
+
+    schedule.isActive = false;
+    await schedule.save();
+
+    return { scheduleId: schedule._id, scheduleCode: schedule.scheduleCode };
+};
+
 module.exports = {
     createSchedule,
     getSchedulesByPartner,
+    getScheduleById,
+    updateSchedule,
+    deleteSchedule,
     getPartnerRoutes,
     getPartnerBuses
 };
