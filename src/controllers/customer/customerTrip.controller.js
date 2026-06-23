@@ -51,7 +51,21 @@ const getLocations = asyncHandler(async (req, res) => {
     return successResponse(res, 200, 'Locations retrieved successfully', result);
 });
 
+const getTripDetail = asyncHandler(async (req, res) => {
+    const { tripId } = req.params;
+    const result = await tripService.getTripDetail(tripId);
+    return successResponse(res, 200, 'Trip detail retrieved successfully', result);
+});
+
+const getTripBookingOptions = asyncHandler(async (req, res) => {
+    const { tripId } = req.params;
+    const result = await tripService.getTripBookingOptions(tripId);
+    return successResponse(res, 200, 'Trip booking options retrieved successfully', result);
+});
+
 module.exports = {
     searchTrips,
-    getLocations
+    getLocations,
+    getTripDetail,
+    getTripBookingOptions
 };

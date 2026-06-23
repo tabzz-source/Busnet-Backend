@@ -297,7 +297,138 @@ const getLocations = async () => {
     };
 };
 
+const getTripDetail = async (tripId) => {
+    const trip = await Trip.findById(tripId)
+        .populate({
+            path: 'routeId',
+            select: 'routeName origin_provinceName origin_districtName origin_representativeAddress destination_provinceName destination_districtName destination_representativeAddress distanceKm estimatedDuration'
+        })
+        .populate({
+            path: 'scheduleId',
+            select: 'scheduleCode departureTime arrivalTime recurrenceType recurrenceRule customDates exceptionDates operationNotes'
+        })
+        .populate({
+            path: 'busId',
+            select: 'busName licensePlate busType totalSeats description images amenities seatLayout_totalRows seatLayout_totalColumns seatLayout_totalFloors'
+        })
+        .populate({
+            path: 'partnerId',
+            select: 'fullName email phone profilePicture'
+        })
+        .lean();
+
+    if (!trip) {
+        throw new AppError('Trip not found', 404);
+    }
+
+    const partnerInfo = await PartnerInformation.findOne({
+        accountId: trip.partnerId?._id || trip.partnerId
+    }).lean();
+
+    return {
+        trip: {
+            _id: trip._id,
+            tripCode: trip.tripCode,
+            departureDate: trip.departureDate,
+            actualDepartureTime: trip.actualDepartureTime,
+            actualArrivalTime: trip.actualArrivalTime,
+            totalSeats: trip.totalSeats,
+            availableSeats: trip.availableSeats,
+            bookedSeats: trip.bookedSeats,
+            heldSeats: trip.heldSeats,
+            priceOverride: trip.priceOverride,
+            status: trip.status,
+            route: trip.routeId,
+            schedule: trip.scheduleId,
+            bus: trip.busId,
+            operator: partnerInfo ? {
+                _id: partnerInfo.accountId,
+                operatorName: partnerInfo.operatorName,
+                operatorPhone: partnerInfo.operatorPhone,
+                description: partnerInfo.description,
+                amenities: partnerInfo.amenities,
+                ratingAvg: partnerInfo.ratingAvg,
+                totalReviews: partnerInfo.totalReviews,
+                isVerified: partnerInfo.isVerified,
+                profilePicture: partnerInfo.profilePicture || null,
+                coverImage: partnerInfo.coverImage || null
+            } : null,
+            seats: Array.isArray(trip.seats)
+                ? trip.seats.map((seat) => ({
+                    seatCode: seat.seatCode,
+                    price: seat.price,
+                    seatType: seat.seatType,
+                    status: seat.status
+                }))
+                : []
+        }
+    };
+};
+
+const getTripBookingOptions = async (tripId) => {
+    const trip = await Trip.findById(tripId)
+        .populate({
+            path: 'routeId',
+            select: 'routeName origin_provinceName origin_districtName origin_representativeAddress destination_provinceName destination_districtName destination_representativeAddress distanceKm estimatedDuration'
+        })
+        .populate({
+            path: 'scheduleId',
+            select: 'scheduleCode departureTime arrivalTime recurrenceType recurrenceRule customDates exceptionDates operationNotes'
+        })
+        .populate({
+            path: 'busId',
+            select: 'busName licensePlate busType totalSeats description images amenities seatLayout_totalRows seatLayout_totalColumns seatLayout_totalFloors'
+        })
+        .lean();
+
+    if (!trip) {
+        throw new AppError('Trip not found', 404);
+    }
+
+    const [pickupPoints, dropoffPoints] = await Promise.all([
+        require('../models/SchedulePickupPoint')
+            .find({ scheduleId: trip.scheduleId._id || trip.scheduleId })
+            .sort({ orderIndex: 1 })
+            .lean(),
+        require('../models/ScheduleDropoffPoint')
+            .find({ scheduleId: trip.scheduleId._id || trip.scheduleId })
+            .sort({ orderIndex: 1 })
+            .lean()
+    ]);
+
+    return {
+        trip: {
+            _id: trip._id,
+            tripCode: trip.tripCode,
+            departureDate: trip.departureDate,
+            actualDepartureTime: trip.actualDepartureTime,
+            actualArrivalTime: trip.actualArrivalTime,
+            totalSeats: trip.totalSeats,
+            availableSeats: trip.availableSeats,
+            bookedSeats: trip.bookedSeats,
+            heldSeats: trip.heldSeats,
+            priceOverride: trip.priceOverride,
+            status: trip.status,
+            route: trip.routeId,
+            schedule: trip.scheduleId,
+            bus: trip.busId,
+            seats: Array.isArray(trip.seats)
+                ? trip.seats.map((seat) => ({
+                    seatCode: seat.seatCode,
+                    price: seat.price,
+                    seatType: seat.seatType,
+                    status: seat.status
+                }))
+                : []
+        },
+        pickupPoints,
+        dropoffPoints
+    };
+};
+
 module.exports = {
     searchTrips,
-    getLocations
+    getLocations,
+    getTripDetail,
+    getTripBookingOptions
 };

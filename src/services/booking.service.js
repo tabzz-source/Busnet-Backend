@@ -10,6 +10,7 @@ const Ticket = require("../models/Ticket");
 
 const AppError = require("../utils/AppError");
 const emailService = require("./email.service");
+const { generateSepayQrUrl } = require("./payment.service");
 const {
   generateUniqueBookingCode,
   isValidBookingCode,
@@ -302,26 +303,6 @@ const extractBookingCodeFromSepayPayload = (payload = {}) => {
   );
 };
 
-const buildQrUrl = ({
-  bankCode,
-  accountNumber,
-  accountName,
-  amount,
-  content,
-}) => {
-  const baseUrl = process.env.VIETQR_BASE_URL || "https://img.vietqr.io/image";
-
-  if (!bankCode || !accountNumber) {
-    return null;
-  }
-
-  const encodedAmount = encodeURIComponent(amount);
-  const encodedContent = encodeURIComponent(content);
-  const encodedAccountName = encodeURIComponent(accountName || "");
-
-  return `${baseUrl}/${bankCode}-${accountNumber}-compact2.png?amount=${encodedAmount}&addInfo=${encodedContent}&accountName=${encodedAccountName}`;
-};
-
 const normalizeSeatCodes = (seatCodes) => {
   if (!Array.isArray(seatCodes)) {
     throw new AppError("seatCodes must be an array", 400);
@@ -411,45 +392,107 @@ const cleanupFailedBooking = async ({
 };
 
 const getPartnerPaymentInfo = async (partnerId) => {
+  console.log("\n================ [PAYMENT][GET PARTNER INFO] ================");
+  console.log("[PAYMENT][INPUT partnerId]", {
+    partnerId,
+    partnerIdString: String(partnerId || ""),
+  });
+
   const partnerInfo = await PartnerInformation.findOne({
     accountId: partnerId,
   }).lean();
 
+  console.log("[PAYMENT][PartnerInformation.findOne result]", {
+    found: !!partnerInfo,
+    partnerInformationId: partnerInfo?._id ? String(partnerInfo._id) : null,
+    accountId: partnerInfo?.accountId ? String(partnerInfo.accountId) : null,
+
+    bankName: partnerInfo?.bankName || null,
+    bankCode: partnerInfo?.bankCode || null,
+    bankNumber: partnerInfo?.bankNumber || null,
+    bankAccountName: partnerInfo?.bankAccountName || null,
+    bankBranch: partnerInfo?.bankBranch || null,
+
+    sepayBankCode: partnerInfo?.sepayBankCode || null,
+    sepayAccountNumber: partnerInfo?.sepayAccountNumber || null,
+
+    paymentEnabled: partnerInfo?.paymentEnabled,
+    sepayWebhookEnabled: partnerInfo?.sepayWebhookEnabled,
+    paymentSetupStatus: partnerInfo?.paymentSetupStatus || null,
+  });
+
   if (!partnerInfo) {
-    return {
-      bankCode: process.env.DEFAULT_SEPAY_BANK_CODE || null,
-      accountNumber: process.env.DEFAULT_SEPAY_ACCOUNT_NUMBER || null,
-      accountName: process.env.DEFAULT_SEPAY_ACCOUNT_NAME || null,
-      raw: null,
-    };
+    console.error("[PAYMENT][ERROR] Partner payment info not found", {
+      partnerId: String(partnerId || ""),
+      reason:
+        "Không tìm thấy PartnerInformation bằng accountId = trip.partnerId / booking.partnerId",
+    });
+
+    throw new AppError(
+      `Partner payment info not found for partnerId ${partnerId}`,
+      400
+    );
+  }
+
+  const bankCode =
+    partnerInfo.sepayBankCode ||
+    partnerInfo.bankCode;
+
+  const accountNumber =
+    partnerInfo.sepayAccountNumber ||
+    partnerInfo.bankNumber ||
+    partnerInfo.bankAccountNumber;
+
+  const accountName =
+    partnerInfo.bankAccountName ||
+    partnerInfo.accountName;
+
+  console.log("[PAYMENT][Normalized payment info]", {
+    displayBankName: partnerInfo.bankName || bankCode || null,
+    bankCode,
+    accountNumber,
+    accountName,
+  });
+
+  if (!bankCode || !accountNumber || !accountName) {
+    console.error("[PAYMENT][ERROR] Partner payment information incomplete", {
+      bankCode,
+      accountNumber,
+      accountName,
+      partnerInformationId: String(partnerInfo._id),
+    });
+
+    throw new AppError("Partner payment information is incomplete", 400);
   }
 
   return {
-    bankCode:
-      partnerInfo.sepayBankCode ||
-      partnerInfo.bankCode ||
-      partnerInfo.bankName ||
-      process.env.DEFAULT_SEPAY_BANK_CODE ||
-      null,
+    // bankName chỉ dùng để hiển thị cho FE
+    bankName: partnerInfo.bankName || bankCode,
 
-    accountNumber:
-      partnerInfo.sepayAccountNumber ||
-      partnerInfo.bankNumber ||
-      partnerInfo.bankAccountNumber ||
-      process.env.DEFAULT_SEPAY_ACCOUNT_NUMBER ||
-      null,
+    // bankCode mới là mã ngân hàng dùng tạo QR: VPB, VCB, ACB...
+    bankCode,
 
-    accountName:
-      partnerInfo.bankAccountName ||
-      partnerInfo.accountName ||
-      process.env.DEFAULT_SEPAY_ACCOUNT_NAME ||
-      null,
+    // giữ cả 2 tên field để FE đang dùng field nào cũng không vỡ
+    bankNumber: accountNumber,
+    accountNumber,
+
+    bankAccountName: accountName,
+    accountName,
 
     raw: partnerInfo,
   };
 };
 
 const createBooking = async (customerId, payload) => {
+  console.log("\n================ [BOOKING][CREATE START] ================");
+  console.log("[BOOKING][INPUT]", {
+    customerId: String(customerId || ""),
+    tripId: payload?.tripId,
+    seatCodes: payload?.seatCodes,
+    passengerName: payload?.passengerName,
+    passengerPhone: payload?.passengerPhone,
+  });
+
   validateRequiredBookingInput(payload);
 
   const seatCodes = normalizeSeatCodes(payload.seatCodes);
@@ -464,6 +507,17 @@ const createBooking = async (customerId, payload) => {
 
   const trip = await Trip.findById(payload.tripId).lean();
 
+  console.log("[BOOKING][TRIP FOUND]", {
+    found: !!trip,
+    tripId: trip?._id ? String(trip._id) : null,
+    tripCode: trip?.tripCode || null,
+    partnerId: trip?.partnerId ? String(trip.partnerId) : null,
+    status: trip?.status || null,
+    availableSeats: trip?.availableSeats,
+    heldSeats: trip?.heldSeats,
+    bookedSeats: trip?.bookedSeats,
+  });
+
   if (!trip) {
     throw new AppError("Trip not found", 404);
   }
@@ -475,6 +529,17 @@ const createBooking = async (customerId, payload) => {
   const selectedSeats = trip.seats.filter((seat) =>
     seatCodes.includes(seat.seatCode),
   );
+
+  console.log("[BOOKING][SELECTED SEATS]", {
+    requestedSeatCodes: seatCodes,
+    foundSeatCodes: selectedSeats.map((seat) => seat.seatCode),
+    selectedSeats: selectedSeats.map((seat) => ({
+      seatCode: seat.seatCode,
+      status: seat.status,
+      price: seat.price,
+      seatType: seat.seatType,
+    })),
+  });
 
   if (selectedSeats.length !== seatCodes.length) {
     throw new AppError("Some selected seats do not exist in this trip", 400);
@@ -495,6 +560,11 @@ const createBooking = async (customerId, payload) => {
     (sum, seat) => sum + Number(seat.price || 0),
     0,
   );
+
+  console.log("[BOOKING][TOTAL]", {
+    total,
+    seatCount,
+  });
 
   if (total <= 0) {
     throw new AppError("Invalid booking total", 400);
@@ -536,6 +606,14 @@ const createBooking = async (customerId, payload) => {
     },
   );
 
+  console.log("[BOOKING][HOLD RESULT]", {
+    acknowledged: holdResult.acknowledged,
+    matchedCount: holdResult.matchedCount,
+    modifiedCount: holdResult.modifiedCount,
+    holdToken,
+    expiresAt,
+  });
+
   if (holdResult.modifiedCount !== 1) {
     throw new AppError("Some seats are no longer available", 409);
   }
@@ -543,6 +621,11 @@ const createBooking = async (customerId, payload) => {
   try {
     const bookingCode = await generateUniqueBookingCode();
     const paymentContent = buildPaymentContent(bookingCode);
+
+    console.log("[BOOKING][BOOKING CODE]", {
+      bookingCode,
+      paymentContent,
+    });
 
     booking = await Booking.create({
       bookingCode,
@@ -571,6 +654,15 @@ const createBooking = async (customerId, payload) => {
       payment_paymentType: "SEPAY",
 
       expiresAt,
+    });
+
+    console.log("[BOOKING][BOOKING CREATED]", {
+      bookingId: String(booking._id),
+      bookingCode: booking.bookingCode,
+      partnerId: String(booking.partnerId),
+      tripId: String(booking.tripId),
+      total: booking.total,
+      payment_status: booking.payment_status,
     });
 
     await Trip.updateOne(
@@ -605,6 +697,11 @@ const createBooking = async (customerId, payload) => {
 
     await BookingSeat.insertMany(bookingSeats);
 
+    console.log("[BOOKING][BOOKING SEATS CREATED]", {
+      bookingId: String(booking._id),
+      seatCodes: bookingSeats.map((seat) => seat.seatCode),
+    });
+
     transaction = await Transaction.create({
       partnerId: trip.partnerId,
       senderAccountId: customerId,
@@ -626,18 +723,48 @@ const createBooking = async (customerId, payload) => {
       },
     });
 
+    console.log("[BOOKING][TRANSACTION CREATED]", {
+      transactionId: String(transaction._id),
+      partnerId: String(transaction.partnerId),
+      amount: transaction.amount,
+      gateway: transaction.gateway,
+      code: transaction.code,
+      content: transaction.content,
+      status: transaction.status,
+    });
+
     booking.payment_transactionId = transaction._id;
     await booking.save();
 
     const paymentInfo = await getPartnerPaymentInfo(trip.partnerId);
 
-    const qrUrl = buildQrUrl({
-      bankCode: paymentInfo.bankCode,
-      accountNumber: paymentInfo.accountNumber,
-      accountName: paymentInfo.accountName,
+    console.log("[BOOKING][QR INPUT BEFORE generateSepayQrUrl]", {
+      // QUAN TRỌNG: bankName ở đây phải là mã bank VPB, không phải VPBank
+      bankName: paymentInfo.bankCode,
+      bankNumber: paymentInfo.accountNumber,
       amount: total,
       content: paymentContent,
+      bankAccountName: paymentInfo.accountName,
+
+      displayBankNameForFE: paymentInfo.bankName,
     });
+
+    const qrUrl = generateSepayQrUrl({
+      bankName: paymentInfo.bankCode,
+      bankNumber: paymentInfo.accountNumber,
+      amount: total,
+      content: paymentContent,
+      bankAccountName: paymentInfo.accountName,
+    });
+
+    console.log("[BOOKING][QR GENERATED]", {
+      qrUrl,
+      expectedBankCode: paymentInfo.bankCode,
+      expectedAccountNumber: paymentInfo.accountNumber,
+      expectedAccountName: paymentInfo.accountName,
+    });
+
+    console.log("================ [BOOKING][CREATE DONE] ================\n");
 
     return {
       booking: {
@@ -655,15 +782,33 @@ const createBooking = async (customerId, payload) => {
         currency: "VND",
         gateway: "SEPAY",
         content: paymentContent,
+
+        // Hiển thị FE
+        bankName: paymentInfo.bankName,
+
+        // Dùng thật để QR
         bankCode: paymentInfo.bankCode,
+        bankNumber: paymentInfo.accountNumber,
         accountNumber: paymentInfo.accountNumber,
+        bankAccountName: paymentInfo.accountName,
         accountName: paymentInfo.accountName,
+
         qrUrl,
         expiresAt,
       },
       serverTime: now,
     };
   } catch (error) {
+    console.error("[BOOKING][CREATE ERROR]", {
+      message: error.message,
+      stack: error.stack,
+      tripId: trip?._id ? String(trip._id) : null,
+      holdToken,
+      seatCount,
+      bookingId: booking?._id ? String(booking._id) : null,
+      transactionId: transaction?._id ? String(transaction._id) : null,
+    });
+
     await cleanupFailedBooking({
       tripId: trip._id,
       holdToken,
@@ -828,12 +973,12 @@ const getBookingPayment = async (customerId, bookingCode) => {
 
   const paymentInfo = await getPartnerPaymentInfo(booking.partnerId);
 
-  const qrUrl = buildQrUrl({
-    bankCode: paymentInfo.bankCode,
-    accountNumber: paymentInfo.accountNumber,
-    accountName: paymentInfo.accountName,
+  const qrUrl = generateSepayQrUrl({
+    bankName: paymentInfo.bankName,
+    bankNumber: paymentInfo.bankNumber,
     amount: transaction.amount,
     content: transaction.content,
+    bankAccountName: paymentInfo.bankAccountName,
   });
 
   return {
@@ -851,8 +996,11 @@ const getBookingPayment = async (customerId, bookingCode) => {
       currency: transaction.currency,
       gateway: transaction.gateway,
       content: transaction.content,
+      bankName: paymentInfo.bankName,
       bankCode: paymentInfo.bankCode,
+      bankNumber: paymentInfo.bankNumber,
       accountNumber: paymentInfo.accountNumber,
+      bankAccountName: paymentInfo.bankAccountName,
       accountName: paymentInfo.accountName,
       qrUrl,
       expiresAt: transaction.expiresAt,

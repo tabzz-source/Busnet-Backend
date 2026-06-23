@@ -74,7 +74,7 @@ const partnerInformationSchema = new mongoose.Schema(
 
         sepayKeyEncrypted: {
             type: String,
-            select: false
+            // select: false
         },
 
         businessLicense: {
