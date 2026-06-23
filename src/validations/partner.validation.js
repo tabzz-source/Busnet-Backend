@@ -79,6 +79,11 @@ const updatePartnerProfileValidation = [
         .trim()
         .isLength({ max: 100 }).withMessage('Bank branch must be at most 100 characters'),
 
+    body('sepayVa')
+        .optional({ nullable: true })
+        .trim()
+        .isLength({ max: 100 }).withMessage('Sepay VA must be at most 100 characters'),
+
     body('taxCode')
         .optional({ nullable: true })
         .trim()
