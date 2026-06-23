@@ -44,9 +44,18 @@ const login = asyncHandler(async (req, res) => {
     return successResponse(res, 200, 'Logged in successfully', result);
 });
 
+/**
+ * POST /api/partner/auth/logout
+ * Partner logout controller
+ */
+const logout = asyncHandler(async (req, res) => {
+    return successResponse(res, 200, 'Logged out successfully', null);
+});
+
 module.exports = {
     register,
     sendVerificationOTP,
     verifyOTP,
-    login
+    login,
+    logout
 };
