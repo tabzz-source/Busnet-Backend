@@ -1,5 +1,6 @@
 const asyncHandler = require('../../utils/asyncHandler');
 const { successResponse } = require('../../utils/response');
+const { Readable } = require('stream');
 const bookingService = require('../../services/booking.service');
 
 const createBooking = asyncHandler(async (req, res) => {
@@ -45,6 +46,28 @@ const getBookingPayment = asyncHandler(async (req, res) => {
     return successResponse(res, 200, 'Booking payment retrieved successfully', data);
 });
 
+const getBookingTickets = asyncHandler(async (req, res) => {
+    const customerId = req.user.id;
+    const { bookingCode } = req.params;
+
+    const data = await bookingService.getBookingTickets(customerId, bookingCode);
+
+    return successResponse(res, 200, 'Booking tickets retrieved successfully', data);
+});
+
+const getBookingTicketsPdf = asyncHandler(async (req, res) => {
+    const customerId = req.user.id;
+    const { bookingCode } = req.params;
+
+    const { pdfBuffer, filename } = await bookingService.getBookingTicketsPdf(customerId, bookingCode);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+
+    return Readable.from([pdfBuffer]).pipe(res);
+});
+
 const cancelBooking = asyncHandler(async (req, res) => {
     const customerId = req.user.id;
     const { bookingCode } = req.params;
@@ -61,5 +84,7 @@ module.exports = {
     getBookingDetail,
     getBookingStatus,
     getBookingPayment,
+    getBookingTicketsPdf,
+    getBookingTickets,
     cancelBooking
 };

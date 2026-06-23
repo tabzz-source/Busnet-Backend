@@ -4,17 +4,303 @@ const Trip = require("../models/Trip");
 const Booking = require("../models/Booking");
 const BookingSeat = require("../models/BookingSeat");
 const Transaction = require("../models/Transaction");
+const Account = require("../models/Account");
 const PartnerInformation = require("../models/PartnerInformation");
+const Ticket = require("../models/Ticket");
 
 const AppError = require("../utils/AppError");
-const { generateUniqueBookingCode } = require("../utils/bookingCode");
-
+const emailService = require("./email.service");
+const {
+  generateUniqueBookingCode,
+  isValidBookingCode,
+  extractBookingCodeFromContent,
+} = require("../utils/bookingCode");
 
 const HOLD_MINUTES = 10;
 
 const generateHoldToken = () => crypto.randomBytes(16).toString("hex");
 
 const buildPaymentContent = (bookingCode) => bookingCode;
+
+const formatMinutesToClock = (minutes) => {
+  const totalMinutes = Number(minutes);
+
+  if (!Number.isFinite(totalMinutes) || totalMinutes < 0) {
+    return null;
+  }
+
+  const hours = String(Math.floor(totalMinutes / 60)).padStart(2, "0");
+  const mins = String(totalMinutes % 60).padStart(2, "0");
+
+  return `${hours}:${mins}`;
+};
+
+const sanitizePdfText = (value) =>
+  String(value ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, "?");
+
+const escapePdfText = (value) =>
+  sanitizePdfText(value)
+    .replace(/\\/g, "\\\\")
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)");
+
+const wrapPdfText = (value, maxLength = 92) => {
+  const text = sanitizePdfText(value).trim();
+
+  if (!text) {
+    return [""];
+  }
+
+  const words = text.split(/\s+/);
+  const lines = [];
+  let currentLine = "";
+
+  for (const word of words) {
+    const candidate = currentLine ? `${currentLine} ${word}` : word;
+
+    if (candidate.length <= maxLength) {
+      currentLine = candidate;
+      continue;
+    }
+
+    if (currentLine) {
+      lines.push(currentLine);
+    }
+
+    if (word.length > maxLength) {
+      for (let index = 0; index < word.length; index += maxLength) {
+        const chunk = word.slice(index, index + maxLength);
+        if (chunk.length === maxLength) {
+          lines.push(chunk);
+        } else {
+          currentLine = chunk;
+        }
+      }
+      if (word.length % maxLength === 0) {
+        currentLine = "";
+      }
+    } else {
+      currentLine = word;
+    }
+  }
+
+  if (currentLine) {
+    lines.push(currentLine);
+  }
+
+  return lines;
+};
+
+const buildPdfBuffer = (pages) => {
+  const header = "%PDF-1.4\n";
+  const objects = [];
+  const pageCount = pages.length;
+  const fontObjectId = pageCount * 2 + 3;
+
+  objects.push({ id: 1, body: "<< /Type /Catalog /Pages 2 0 R >>" });
+
+  const pageKids = [];
+  for (let pageIndex = 0; pageIndex < pageCount; pageIndex += 1) {
+    const pageObjectId = 3 + pageIndex * 2;
+    const contentObjectId = pageObjectId + 1;
+    pageKids.push(`${pageObjectId} 0 R`);
+
+    objects.push({
+      id: pageObjectId,
+      body: `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 ${fontObjectId} 0 R >> >> /Contents ${contentObjectId} 0 R >>`,
+    });
+
+    const page = pages[pageIndex];
+    const contentLines = [];
+    contentLines.push("BT");
+    contentLines.push("/F1 18 Tf");
+    contentLines.push("1 0 0 1 50 790 Tm");
+    contentLines.push(`(${escapePdfText(page.title)}) Tj`);
+
+    let y = 765;
+    const lineHeight = 14;
+
+    for (const line of page.lines) {
+      contentLines.push("/F1 10 Tf");
+      contentLines.push(`1 0 0 1 50 ${y} Tm`);
+      contentLines.push(`(${escapePdfText(line)}) Tj`);
+      y -= lineHeight;
+    }
+
+    contentLines.push("ET");
+
+    const contentStream = contentLines.join("\n");
+    objects.push({
+      id: contentObjectId,
+      body: `<< /Length ${Buffer.byteLength(contentStream, "ascii")} >>\nstream\n${contentStream}\nendstream`,
+    });
+  }
+
+  objects.push({
+    id: 2,
+    body: `<< /Type /Pages /Kids [${pageKids.join(" ")}] /Count ${pageCount} >>`,
+  });
+
+  objects.push({
+    id: fontObjectId,
+    body: "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  });
+
+  const orderedObjects = objects.sort((a, b) => a.id - b.id);
+  const chunks = [header];
+  const offsets = [0];
+  let currentOffset = Buffer.byteLength(header, "ascii");
+
+  for (const obj of orderedObjects) {
+    const body = `${obj.id} 0 obj\n${obj.body}\nendobj\n`;
+    offsets.push(currentOffset);
+    chunks.push(body);
+    currentOffset += Buffer.byteLength(body, "ascii");
+  }
+
+  const xrefOffset = currentOffset;
+  const xrefEntries = ["xref", `0 ${orderedObjects.length + 1}`, "0000000000 65535 f "];
+
+  for (let i = 1; i <= orderedObjects.length; i += 1) {
+    const offset = String(offsets[i]).padStart(10, "0");
+    xrefEntries.push(`${offset} 00000 n `);
+  }
+
+  const trailer = [
+    "trailer",
+    `<< /Size ${orderedObjects.length + 1} /Root 1 0 R >>`,
+    "startxref",
+    String(xrefOffset),
+    "%%EOF",
+  ].join("\n");
+
+  const pdfString = `${chunks.join("")}${xrefEntries.join("\n")}\n${trailer}`;
+  return Buffer.from(pdfString, "ascii");
+};
+
+const buildBookingTicketsPdf = async (customerId, bookingCode) => {
+  const normalizedCode = String(bookingCode || "").trim().toUpperCase();
+
+  const booking = await Booking.findOne({
+    bookingCode: normalizedCode,
+    customerId,
+  })
+    .populate({
+      path: "tripId",
+      select:
+        "tripCode departureDate actualDepartureTime actualArrivalTime routeId partnerId",
+      populate: {
+        path: "routeId",
+        select:
+          "routeName origin_provinceName origin_districtName destination_provinceName destination_districtName",
+      },
+    })
+    .lean();
+
+  if (!booking) {
+    throw new AppError("Booking not found", 404);
+  }
+
+  if (booking.status !== "CONFIRMED" || booking.payment_status !== "PAID") {
+    throw new AppError("Booking must be confirmed and paid before downloading tickets", 400);
+  }
+
+  const [tickets, bookingSeats] = await Promise.all([
+    Ticket.find({ bookingId: booking._id }).sort({ seatCode: 1 }).lean(),
+    BookingSeat.find({ bookingId: booking._id }).sort({ seatCode: 1 }).lean(),
+  ]);
+
+  if (tickets.length === 0) {
+    throw new AppError("Tickets not found", 404);
+  }
+
+  const trip = booking.tripId || {};
+  const route = trip.routeId || {};
+  const seatMap = new Map(
+    bookingSeats.map((seat) => [String(seat.seatCode || "").toUpperCase(), seat]),
+  );
+
+  const departureDateText = booking.tripId?.departureDate
+    ? new Date(booking.tripId.departureDate).toLocaleDateString("en-GB", {
+        timeZone: "Asia/Bangkok",
+      })
+    : "N/A";
+
+  const departureTimeText = formatMinutesToClock(trip.actualDepartureTime) || "N/A";
+  const arrivalTimeText = formatMinutesToClock(trip.actualArrivalTime) || "N/A";
+
+  const lines = [
+    `Booking Code: ${booking.bookingCode}`,
+    `Status: ${booking.status}`,
+    `Payment Status: ${booking.payment_status}`,
+    `Passenger: ${booking.passengerName || "N/A"}`,
+    `Passenger Phone: ${booking.passengerPhone || "N/A"}`,
+    `Trip Code: ${trip.tripCode || "N/A"}`,
+    `Route: ${route.routeName || "N/A"}`,
+    `From: ${route.origin_provinceName || "N/A"}${route.origin_districtName ? `, ${route.origin_districtName}` : ""}`,
+    `To: ${route.destination_provinceName || "N/A"}${route.destination_districtName ? `, ${route.destination_districtName}` : ""}`,
+    `Departure Date: ${departureDateText}`,
+    `Departure Time: ${departureTimeText}`,
+    `Arrival Time: ${arrivalTimeText}`,
+    `Pickup: ${booking.pickupPoint_name || "N/A"} - ${booking.pickupPoint_address || "N/A"} (${booking.pickupPoint_time || "N/A"})`,
+    `Dropoff: ${booking.dropoffPoint_name || "N/A"} - ${booking.dropoffPoint_address || "N/A"} (${booking.dropoffPoint_time || "N/A"})`,
+    `Total: ${Number(booking.total || 0).toLocaleString("en-US")} VND`,
+    "Tickets:",
+  ];
+
+  tickets.forEach((ticket, index) => {
+    const seat = seatMap.get(String(ticket.seatCode || "").toUpperCase()) || {};
+    lines.push(
+      `${index + 1}. Ticket: ${ticket.ticketCode} | Seat: ${ticket.seatCode} | Type: ${seat.seatType || "N/A"} | Status: ${ticket.status}`,
+    );
+  });
+
+  const wrappedLines = [];
+  lines.forEach((line) => {
+    const wrapped = wrapPdfText(line, 90);
+    wrappedLines.push(...wrapped);
+  });
+
+  const pageSize = 40;
+  const pages = [];
+
+  for (let index = 0; index < wrappedLines.length; index += pageSize) {
+    pages.push({
+      title: `BusNet Booking Tickets - ${booking.bookingCode}`,
+      lines: wrappedLines.slice(index, index + pageSize),
+    });
+  }
+
+  if (pages.length === 0) {
+    pages.push({
+      title: `BusNet Booking Tickets - ${booking.bookingCode}`,
+      lines: ["No ticket data available"],
+    });
+  }
+
+  return {
+    pdfBuffer: buildPdfBuffer(pages),
+    filename: `tickets-${normalizedCode}.pdf`,
+  };
+};
+
+const extractBookingCodeFromSepayPayload = (payload = {}) => {
+  const directCode = String(payload.code || "")
+    .trim()
+    .toUpperCase();
+
+  if (isValidBookingCode(directCode)) {
+    return directCode;
+  }
+
+  return (
+    extractBookingCodeFromContent(payload.content) ||
+    extractBookingCodeFromContent(payload.description)
+  );
+};
 
 const buildQrUrl = ({
   bankCode,
@@ -391,340 +677,686 @@ const createBooking = async (customerId, payload) => {
 };
 
 const getMyBookings = async (customerId, query = {}) => {
-    const page = Math.max(Number(query.page) || 1, 1);
-    const limit = Math.min(Math.max(Number(query.limit) || 10, 1), 50);
-    const skip = (page - 1) * limit;
+  const page = Math.max(Number(query.page) || 1, 1);
+  const limit = Math.min(Math.max(Number(query.limit) || 10, 1), 50);
+  const skip = (page - 1) * limit;
 
-    const filter = {
-        customerId
-    };
+  const filter = {
+    customerId,
+  };
 
-    if (query.status) {
-        filter.status = String(query.status).trim().toUpperCase();
-    }
+  if (query.status) {
+    filter.status = String(query.status).trim().toUpperCase();
+  }
 
-    if (query.payment_status) {
-        filter.payment_status = String(query.payment_status).trim().toUpperCase();
-    }
+  if (query.payment_status) {
+    filter.payment_status = String(query.payment_status).trim().toUpperCase();
+  }
 
-    const [bookings, totalItems] = await Promise.all([
-        Booking.find(filter)
-            .populate({
-                path: 'tripId',
-                select: 'tripCode departureDate actualDepartureTime actualArrivalTime status'
-            })
-            .populate({
-                path: 'partnerId',
-                select: 'fullName email phone profilePicture'
-            })
-            .sort({ createdAt: -1 })
-            .skip(skip)
-            .limit(limit)
-            .lean(),
+  const [bookings, totalItems] = await Promise.all([
+    Booking.find(filter)
+      .populate({
+        path: "tripId",
+        select:
+          "tripCode departureDate actualDepartureTime actualArrivalTime status",
+      })
+      .populate({
+        path: "partnerId",
+        select: "fullName email phone profilePicture",
+      })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
 
-        Booking.countDocuments(filter)
-    ]);
+    Booking.countDocuments(filter),
+  ]);
 
-    return {
-        bookings,
-        pagination: {
-            totalItems,
-            totalPages: Math.ceil(totalItems / limit),
-            currentPage: page,
-            limit
-        }
-    };
+  return {
+    bookings,
+    pagination: {
+      totalItems,
+      totalPages: Math.ceil(totalItems / limit),
+      currentPage: page,
+      limit,
+    },
+  };
 };
 
 const getBookingByCodeForCustomer = async (customerId, bookingCode) => {
-    const booking = await Booking.findOne({
-        bookingCode: String(bookingCode || '').trim().toUpperCase(),
-        customerId
+  const booking = await Booking.findOne({
+    bookingCode: String(bookingCode || "")
+      .trim()
+      .toUpperCase(),
+    customerId,
+  })
+    .populate({
+      path: "tripId",
+      select:
+        "tripCode departureDate actualDepartureTime actualArrivalTime status routeId scheduleId busId partnerId",
+      populate: [
+        {
+          path: "routeId",
+          select:
+            "routeName originProvince originDistrict destinationProvince destinationDistrict distanceKm estimatedDuration",
+        },
+        {
+          path: "scheduleId",
+          select: "scheduleCode departureTime arrivalTime recurrenceType",
+        },
+        {
+          path: "busId",
+          select: "busName busType totalSeats licensePlate images",
+        },
+      ],
     })
-        .populate({
-            path: 'tripId',
-            select: 'tripCode departureDate actualDepartureTime actualArrivalTime status routeId scheduleId busId partnerId',
-            populate: [
-                {
-                    path: 'routeId',
-                    select: 'routeName originProvince originDistrict destinationProvince destinationDistrict distanceKm estimatedDuration'
-                },
-                {
-                    path: 'scheduleId',
-                    select: 'scheduleCode departureTime arrivalTime recurrenceType'
-                },
-                {
-                    path: 'busId',
-                    select: 'busName busType totalSeats licensePlate images'
-                }
-            ]
-        })
-        .populate({
-            path: 'partnerId',
-            select: 'fullName email phone profilePicture'
-        });
+    .populate({
+      path: "partnerId",
+      select: "fullName email phone profilePicture",
+    });
 
-    if (!booking) {
-        throw new AppError('Booking not found', 404);
-    }
+  if (!booking) {
+    throw new AppError("Booking not found", 404);
+  }
 
-    return booking;
+  return booking;
 };
 
 const getBookingDetail = async (customerId, bookingCode) => {
-    const booking = await getBookingByCodeForCustomer(customerId, bookingCode);
+  const booking = await getBookingByCodeForCustomer(customerId, bookingCode);
 
-    const [seats, transaction] = await Promise.all([
-        BookingSeat.find({ bookingId: booking._id }).lean(),
-        Transaction.findOne({ bookingId: booking._id }).lean()
-    ]);
+  const [seats, transaction] = await Promise.all([
+    BookingSeat.find({ bookingId: booking._id }).lean(),
+    Transaction.findOne({ bookingId: booking._id }).lean(),
+  ]);
 
-    return {
-        booking,
-        seats,
-        transaction
-    };
+  return {
+    booking,
+    seats,
+    transaction,
+  };
 };
 
 const getBookingStatus = async (customerId, bookingCode) => {
-    const booking = await Booking.findOne({
-        bookingCode: String(bookingCode || '').trim().toUpperCase(),
-        customerId
-    })
-        .select('bookingCode status payment_status total payment_amount expiresAt confirmedAt cancelledAt createdAt updatedAt')
-        .lean();
+  const booking = await Booking.findOne({
+    bookingCode: String(bookingCode || "")
+      .trim()
+      .toUpperCase(),
+    customerId,
+  })
+    .select(
+      "bookingCode status payment_status total payment_amount expiresAt confirmedAt cancelledAt createdAt updatedAt",
+    )
+    .lean();
 
-    if (!booking) {
-        throw new AppError('Booking not found', 404);
-    }
+  if (!booking) {
+    throw new AppError("Booking not found", 404);
+  }
 
-    return {
-        bookingCode: booking.bookingCode,
-        status: booking.status,
-        payment_status: booking.payment_status,
-        total: booking.total,
-        payment_amount: booking.payment_amount,
-        expiresAt: booking.expiresAt,
-        confirmedAt: booking.confirmedAt,
-        cancelledAt: booking.cancelledAt,
-        createdAt: booking.createdAt,
-        updatedAt: booking.updatedAt,
-        serverTime: new Date()
-    };
+  return {
+    bookingCode: booking.bookingCode,
+    status: booking.status,
+    payment_status: booking.payment_status,
+    total: booking.total,
+    payment_amount: booking.payment_amount,
+    expiresAt: booking.expiresAt,
+    confirmedAt: booking.confirmedAt,
+    cancelledAt: booking.cancelledAt,
+    createdAt: booking.createdAt,
+    updatedAt: booking.updatedAt,
+    serverTime: new Date(),
+  };
 };
 
 const getBookingPayment = async (customerId, bookingCode) => {
-    const booking = await Booking.findOne({
-        bookingCode: String(bookingCode || '').trim().toUpperCase(),
-        customerId
-    });
+  const booking = await Booking.findOne({
+    bookingCode: String(bookingCode || "")
+      .trim()
+      .toUpperCase(),
+    customerId,
+  });
 
-    if (!booking) {
-        throw new AppError('Booking not found', 404);
-    }
+  if (!booking) {
+    throw new AppError("Booking not found", 404);
+  }
 
-    const transaction = await Transaction.findOne({ bookingId: booking._id });
+  const transaction = await Transaction.findOne({ bookingId: booking._id });
 
-    if (!transaction) {
-        throw new AppError('Transaction not found', 404);
-    }
+  if (!transaction) {
+    throw new AppError("Transaction not found", 404);
+  }
 
-    const paymentInfo = await getPartnerPaymentInfo(booking.partnerId);
+  const paymentInfo = await getPartnerPaymentInfo(booking.partnerId);
 
-    const qrUrl = buildQrUrl({
-        bankCode: paymentInfo.bankCode,
-        accountNumber: paymentInfo.accountNumber,
-        accountName: paymentInfo.accountName,
-        amount: transaction.amount,
-        content: transaction.content
-    });
+  const qrUrl = buildQrUrl({
+    bankCode: paymentInfo.bankCode,
+    accountNumber: paymentInfo.accountNumber,
+    accountName: paymentInfo.accountName,
+    amount: transaction.amount,
+    content: transaction.content,
+  });
 
-    return {
-        booking: {
-            bookingCode: booking.bookingCode,
-            status: booking.status,
-            payment_status: booking.payment_status,
-            total: booking.total,
-            expiresAt: booking.expiresAt
-        },
-        payment: {
-            transactionId: transaction._id,
-            status: transaction.status,
-            amount: transaction.amount,
-            currency: transaction.currency,
-            gateway: transaction.gateway,
-            content: transaction.content,
-            bankCode: paymentInfo.bankCode,
-            accountNumber: paymentInfo.accountNumber,
-            accountName: paymentInfo.accountName,
-            qrUrl,
-            expiresAt: transaction.expiresAt
-        },
-        serverTime: new Date()
-    };
+  return {
+    booking: {
+      bookingCode: booking.bookingCode,
+      status: booking.status,
+      payment_status: booking.payment_status,
+      total: booking.total,
+      expiresAt: booking.expiresAt,
+    },
+    payment: {
+      transactionId: transaction._id,
+      status: transaction.status,
+      amount: transaction.amount,
+      currency: transaction.currency,
+      gateway: transaction.gateway,
+      content: transaction.content,
+      bankCode: paymentInfo.bankCode,
+      accountNumber: paymentInfo.accountNumber,
+      accountName: paymentInfo.accountName,
+      qrUrl,
+      expiresAt: transaction.expiresAt,
+    },
+    serverTime: new Date(),
+  };
 };
 
+const getBookingTickets = async (customerId, bookingCode) => {
+  const normalizedCode = String(bookingCode || "").trim().toUpperCase();
+
+  const booking = await Booking.findOne({
+    bookingCode: normalizedCode,
+    customerId,
+  }).lean();
+
+  if (!booking) {
+    throw new AppError("Booking not found", 404);
+  }
+
+  const tickets = await Ticket.find({ bookingId: booking._id }).lean();
+
+  return {
+    bookingCode: booking.bookingCode,
+    tickets,
+  };
+};
+
+const getBookingTicketsPdf = async (customerId, bookingCode) =>
+  buildBookingTicketsPdf(customerId, bookingCode);
+
 const releaseHeldSeatsForBooking = async (booking) => {
-    const bookingSeats = await BookingSeat.find({ bookingId: booking._id }).lean();
-    const seatCodes = bookingSeats.map((seat) => seat.seatCode);
+  const bookingSeats = await BookingSeat.find({
+    bookingId: booking._id,
+  }).lean();
+  const seatCodes = bookingSeats.map((seat) => seat.seatCode);
 
-    if (seatCodes.length === 0) {
-        return {
-            releasedSeatCodes: [],
-            releasedCount: 0
-        };
-    }
+  if (seatCodes.length === 0) {
+    return {
+      releasedSeatCodes: [],
+      releasedCount: 0,
+    };
+  }
 
-    const result = await Trip.updateOne(
+  const result = await Trip.updateOne(
+    {
+      _id: booking.tripId,
+    },
+    {
+      $set: {
+        "seats.$[seat].status": "AVAILABLE",
+        "seats.$[seat].bookingId": null,
+        "seats.$[seat].holdToken": null,
+        "seats.$[seat].lockedUntil": null,
+      },
+      $inc: {
+        availableSeats: seatCodes.length,
+        heldSeats: -seatCodes.length,
+      },
+    },
+    {
+      arrayFilters: [
         {
-            _id: booking.tripId
+          "seat.seatCode": { $in: seatCodes },
+          "seat.bookingId": booking._id,
+          "seat.status": "HELD",
         },
-        {
-            $set: {
-                'seats.$[seat].status': 'AVAILABLE',
-                'seats.$[seat].bookingId': null,
-                'seats.$[seat].holdToken': null,
-                'seats.$[seat].lockedUntil': null
-            },
-            $inc: {
-                availableSeats: seatCodes.length,
-                heldSeats: -seatCodes.length
-            }
+      ],
+    },
+  );
+
+  return {
+    releasedSeatCodes: seatCodes,
+    releasedCount: result.modifiedCount === 1 ? seatCodes.length : 0,
+  };
+};
+
+const createTicketsForPaidBooking = async (booking) => {
+  const existingTickets = await Ticket.find({ bookingId: booking._id }).lean();
+
+  if (existingTickets.length > 0) {
+    return {
+      createdCount: 0,
+      skipped: true,
+    };
+  }
+
+  const bookingSeats = await BookingSeat.find({ bookingId: booking._id }).lean();
+
+  if (bookingSeats.length === 0) {
+    throw new AppError("Booking seats not found", 404);
+  }
+
+  const buildTicketCode = (seatCode) =>
+    `${String(booking.bookingCode || "").trim().toUpperCase()}-${String(seatCode || "").trim().toUpperCase()}`;
+
+  const tickets = bookingSeats.map((seat) => ({
+    bookingId: booking._id,
+    tripId: booking.tripId,
+    seatCode: seat.seatCode,
+    ticketCode: buildTicketCode(seat.seatCode),
+  }));
+
+  const createdTickets = await Ticket.insertMany(tickets);
+
+  return {
+    createdCount: createdTickets.length,
+    skipped: false,
+  };
+};
+
+const processSepayBookingPayment = async (payload = {}, authenticatedPartner = null) => {
+  const bookingCode = extractBookingCodeFromSepayPayload(payload);
+
+  if (!bookingCode) {
+    return {
+      handled: false,
+    };
+  }
+
+  if (payload.transferType && String(payload.transferType).toLowerCase() !== "in") {
+    return {
+      handled: true,
+      message: "Acknowledged: Not an incoming payment",
+      data: {
+        bookingCode,
+      },
+    };
+  }
+
+  const transferAmount = Number(payload.transferAmount || 0);
+
+  if (!Number.isFinite(transferAmount) || transferAmount <= 0) {
+    throw new AppError("Invalid transfer amount", 400);
+  }
+
+  const booking = await Booking.findOne({ bookingCode });
+
+  if (!booking) {
+    return {
+      handled: true,
+      message: "Acknowledged: Booking not found",
+      data: {
+        bookingCode,
+      },
+    };
+  }
+
+  const authenticatedPartnerId = authenticatedPartner
+    ? String(
+        authenticatedPartner.accountId ||
+          authenticatedPartner.partnerId ||
+          authenticatedPartner._id ||
+          "",
+      )
+    : "";
+
+  if (authenticatedPartnerId && String(booking.partnerId) !== authenticatedPartnerId) {
+    return {
+      handled: true,
+      message: "Acknowledged: Webhook partner does not match booking partner",
+      data: {
+        bookingCode,
+      },
+    };
+  }
+
+  const transaction = await Transaction.findOne({
+    bookingId: booking._id,
+    transactionType: "BOOKING_PAYMENT",
+  });
+
+  if (!transaction) {
+    return {
+      handled: true,
+      message: "Acknowledged: Booking payment transaction not found",
+      data: {
+        bookingCode,
+      },
+    };
+  }
+
+  if (transaction.status === "SUCCESS" || booking.payment_status === "PAID") {
+    return {
+      handled: true,
+      message: "Booking payment already processed",
+      data: {
+        bookingCode: booking.bookingCode,
+        transactionId: transaction._id,
+      },
+    };
+  }
+
+  if (booking.status !== "PENDING_PAYMENT" || booking.payment_status !== "PENDING") {
+    return {
+      handled: true,
+      message: "Acknowledged: Booking is not pending payment",
+      data: {
+        bookingCode: booking.bookingCode,
+        transactionId: transaction._id,
+      },
+    };
+  }
+
+  if (booking.expiresAt && booking.expiresAt <= new Date()) {
+    return {
+      handled: true,
+      message: "Acknowledged: Booking payment has expired",
+      data: {
+        bookingCode: booking.bookingCode,
+        transactionId: transaction._id,
+      },
+    };
+  }
+
+  if (transferAmount < Number(transaction.amount)) {
+    await Transaction.updateOne(
+      { _id: transaction._id },
+      {
+        $set: {
+          status: "FAILED",
+          transferAmount,
+          sepayTransactionId: payload.id || transaction.sepayTransactionId,
+          gateway: payload.gateway || transaction.gateway,
+          transactionDate: payload.transactionDate
+            ? new Date(payload.transactionDate)
+            : transaction.transactionDate,
+          accountNumber: payload.accountNumber || transaction.accountNumber,
+          subAccount: payload.subAccount || transaction.subAccount,
+          transferType: payload.transferType || transaction.transferType,
+          referenceCode: payload.referenceCode || transaction.referenceCode,
+          description: payload.description || transaction.description,
         },
-        {
-            arrayFilters: [
-                {
-                    'seat.seatCode': { $in: seatCodes },
-                    'seat.bookingId': booking._id,
-                    'seat.status': 'HELD'
-                }
-            ]
-        }
+      },
     );
 
     return {
-        releasedSeatCodes: seatCodes,
-        releasedCount: result.modifiedCount === 1 ? seatCodes.length : 0
+      handled: true,
+      message: "Acknowledged: Insufficient payment amount",
+      data: {
+        bookingCode: booking.bookingCode,
+        transactionId: transaction._id,
+        transferAmount,
+      },
     };
+  }
+
+  const bookingSeats = await BookingSeat.find({ bookingId: booking._id }).lean();
+  const seatCodes = bookingSeats.map((seat) => seat.seatCode);
+
+  if (seatCodes.length === 0) {
+    throw new AppError("Booking seats not found", 404);
+  }
+
+  await Transaction.updateOne(
+    { _id: transaction._id },
+    {
+      $set: {
+        status: "SUCCESS",
+        transferAmount,
+        sepayTransactionId: payload.id || transaction.sepayTransactionId,
+        gateway: payload.gateway || transaction.gateway,
+        transactionDate: payload.transactionDate
+          ? new Date(payload.transactionDate)
+          : transaction.transactionDate,
+        accountNumber: payload.accountNumber || transaction.accountNumber,
+        subAccount: payload.subAccount || transaction.subAccount,
+        transferType: payload.transferType || transaction.transferType,
+        referenceCode: payload.referenceCode || transaction.referenceCode,
+        description: payload.description || transaction.description,
+      },
+    },
+  );
+
+  const bookingUpdate = {
+    status: "CONFIRMED",
+    payment_status: "PAID",
+  };
+
+  if (Booking.schema?.paths?.confirmedAt) {
+    bookingUpdate.confirmedAt = new Date();
+  }
+
+  if (Booking.schema?.paths?.paidAt) {
+    bookingUpdate.paidAt = new Date();
+  }
+
+  await Booking.updateOne(
+    { _id: booking._id },
+    {
+      $set: bookingUpdate,
+    },
+  );
+
+  await Trip.updateOne(
+    {
+      _id: booking.tripId,
+    },
+    {
+      $set: {
+        "seats.$[seat].status": "BOOKED",
+        "seats.$[seat].bookingId": booking._id,
+        "seats.$[seat].holdToken": null,
+        "seats.$[seat].lockedUntil": null,
+      },
+      $inc: {
+        heldSeats: -seatCodes.length,
+        bookedSeats: seatCodes.length,
+      },
+    },
+    {
+      arrayFilters: [
+        {
+          "seat.seatCode": { $in: seatCodes },
+          "seat.bookingId": booking._id,
+          "seat.status": "HELD",
+        },
+      ],
+    },
+  );
+
+  const ticketResult = await createTicketsForPaidBooking(booking);
+
+  const [customerAccount, tripForEmail] = await Promise.all([
+    Account.findById(booking.customerId).select("email fullName").lean(),
+    Trip.findById(booking.tripId)
+      .select("tripCode departureDate actualDepartureTime actualArrivalTime")
+      .lean(),
+  ]);
+
+  const recipientEmail = booking.passengerEmail || customerAccount?.email || null;
+
+  if (recipientEmail) {
+    const departureTime = formatMinutesToClock(tripForEmail?.actualDepartureTime);
+    const passengerName =
+      booking.passengerName || customerAccount?.fullName || "Customer";
+
+    emailService
+      .sendBookingConfirmationEmail({
+        email: recipientEmail,
+        customerName: passengerName,
+        bookingCode: booking.bookingCode,
+        tripCode: tripForEmail?.tripCode || String(booking.tripId),
+        departureDate: tripForEmail?.departureDate || booking.createdAt,
+        departureTime,
+        seatCodes,
+        total: booking.total,
+        passengerPhone: booking.passengerPhone,
+        pickupPoint: [booking.pickupPoint_name, booking.pickupPoint_address]
+          .filter(Boolean)
+          .join(" - "),
+        dropoffPoint: [booking.dropoffPoint_name, booking.dropoffPoint_address]
+          .filter(Boolean)
+          .join(" - "),
+      })
+      .catch((err) =>
+        console.error("[Booking Webhook] Failed to send booking confirmation email:", err),
+      );
+  }
+
+  return {
+    handled: true,
+    message: "Booking payment processed successfully",
+    data: {
+      bookingCode: booking.bookingCode,
+      transactionId: transaction._id,
+      transferAmount,
+      seatCodes,
+      ticketResult,
+    },
+  };
 };
 
 const expireStaleBookings = async () => {
-    const now = new Date();
+  const now = new Date();
 
-    const staleBookings = await Booking.find({
-        status: 'PENDING_PAYMENT',
-        payment_status: 'PENDING',
-        expiresAt: { $lte: now }
-    }).limit(100);
+  const staleBookings = await Booking.find({
+    status: "PENDING_PAYMENT",
+    payment_status: "PENDING",
+    expiresAt: { $lte: now },
+  }).limit(100);
 
-    const results = [];
+  const results = [];
 
-    for (const booking of staleBookings) {
-        const releaseResult = await releaseHeldSeatsForBooking(booking);
+  for (const booking of staleBookings) {
+    const releaseResult = await releaseHeldSeatsForBooking(booking);
 
-        await Transaction.updateMany(
-            {
-                bookingId: booking._id,
-                status: 'PENDING'
-            },
-            {
-                $set: {
-                    status: 'EXPIRED'
-                }
-            }
-        );
+    await Transaction.updateMany(
+      {
+        bookingId: booking._id,
+        status: "PENDING",
+      },
+      {
+        $set: {
+          status: "EXPIRED",
+        },
+      },
+    );
 
-        booking.payment_status = 'EXPIRED';
-        await booking.save();
+    booking.payment_status = "EXPIRED";
+    await booking.save();
 
-        results.push({
-            bookingCode: booking.bookingCode,
-            releasedSeatCodes: releaseResult.releasedSeatCodes,
-            releasedCount: releaseResult.releasedCount
-        });
-    }
+    results.push({
+      bookingCode: booking.bookingCode,
+      releasedSeatCodes: releaseResult.releasedSeatCodes,
+      releasedCount: releaseResult.releasedCount,
+    });
+  }
 
-    return {
-        expiredCount: results.length,
-        results
-    };
+  return {
+    expiredCount: results.length,
+    results,
+  };
 };
 
-const cancelBooking = async (customerId, bookingCode, reason = '') => {
-    const booking = await Booking.findOne({
-        bookingCode: String(bookingCode || '').trim().toUpperCase(),
-        customerId
-    });
+const cancelBooking = async (customerId, bookingCode, reason = "") => {
+  const booking = await Booking.findOne({
+    bookingCode: String(bookingCode || "")
+      .trim()
+      .toUpperCase(),
+    customerId,
+  });
 
-    if (!booking) {
-        throw new AppError('Booking not found', 404);
-    }
+  if (!booking) {
+    throw new AppError("Booking not found", 404);
+  }
 
-    if (['CANCELLED_BY_CUSTOMER', 'CANCELLED_BY_OPERATOR', 'REFUNDED'].includes(booking.status)) {
-        throw new AppError('Booking has already been cancelled', 400);
-    }
+  if (
+    ["CANCELLED_BY_CUSTOMER", "CANCELLED_BY_OPERATOR", "REFUNDED"].includes(
+      booking.status,
+    )
+  ) {
+    throw new AppError("Booking has already been cancelled", 400);
+  }
 
-    if (booking.status === 'COMPLETED') {
-        throw new AppError('Completed booking cannot be cancelled', 400);
-    }
+  if (booking.status === "COMPLETED") {
+    throw new AppError("Completed booking cannot be cancelled", 400);
+  }
 
-    if (booking.status === 'PENDING_PAYMENT' && booking.payment_status === 'PENDING') {
-        const releaseResult = await releaseHeldSeatsForBooking(booking);
+  if (
+    booking.status === "PENDING_PAYMENT" &&
+    booking.payment_status === "PENDING"
+  ) {
+    const releaseResult = await releaseHeldSeatsForBooking(booking);
 
-        booking.status = 'CANCELLED_BY_CUSTOMER';
-        booking.payment_status = 'CANCELLED';
-        booking.cancelReason = reason;
-        booking.cancelledAt = new Date();
+    booking.status = "CANCELLED_BY_CUSTOMER";
+    booking.payment_status = "CANCELLED";
+    booking.cancelReason = reason;
+    booking.cancelledAt = new Date();
 
-        await booking.save();
+    await booking.save();
 
-        await Transaction.updateMany(
-            {
-                bookingId: booking._id,
-                status: 'PENDING'
-            },
-            {
-                $set: {
-                    status: 'CANCELLED'
-                }
-            }
-        );
+    await Transaction.updateMany(
+      {
+        bookingId: booking._id,
+        status: "PENDING",
+      },
+      {
+        $set: {
+          status: "CANCELLED",
+        },
+      },
+    );
 
-        return {
-            bookingCode: booking.bookingCode,
-            status: booking.status,
-            payment_status: booking.payment_status,
-            releasedSeatCodes: releaseResult.releasedSeatCodes,
-            releasedCount: releaseResult.releasedCount
-        };
-    }
+    return {
+      bookingCode: booking.bookingCode,
+      status: booking.status,
+      payment_status: booking.payment_status,
+      releasedSeatCodes: releaseResult.releasedSeatCodes,
+      releasedCount: releaseResult.releasedCount,
+    };
+  }
 
-    if (booking.status === 'CONFIRMED' && booking.payment_status === 'PAID') {
-        booking.status = 'CANCEL_REQUESTED';
-        booking.cancelReason = reason;
-        booking.cancelledAt = new Date();
+  if (booking.status === "CONFIRMED" && booking.payment_status === "PAID") {
+    booking.status = "CANCEL_REQUESTED";
+    booking.cancelReason = reason;
+    booking.cancelledAt = new Date();
 
-        await booking.save();
+    await booking.save();
 
-        return {
-            bookingCode: booking.bookingCode,
-            status: booking.status,
-            payment_status: booking.payment_status,
-            message: 'Cancellation request submitted. Refund will be handled manually.'
-        };
-    }
+    return {
+      bookingCode: booking.bookingCode,
+      status: booking.status,
+      payment_status: booking.payment_status,
+      message:
+        "Cancellation request submitted. Refund will be handled manually.",
+    };
+  }
 
-    throw new AppError('Booking cannot be cancelled in current status', 400);
+  throw new AppError("Booking cannot be cancelled in current status", 400);
 };
 
 module.exports = {
-    createBooking,
-    getMyBookings,
-    getBookingDetail,
-    getBookingStatus,
-    getBookingPayment,
-    releaseHeldSeatsForBooking,
-    expireStaleBookings,
-    cancelBooking,
-    cleanupFailedBooking
+  createBooking,
+  getMyBookings,
+  getBookingDetail,
+  getBookingStatus,
+  getBookingPayment,
+  getBookingTickets,
+  getBookingTicketsPdf,
+  releaseHeldSeatsForBooking,
+  expireStaleBookings,
+  cancelBooking,
+  cleanupFailedBooking,
+  processSepayBookingPayment,
+  createTicketsForPaidBooking,
 };
