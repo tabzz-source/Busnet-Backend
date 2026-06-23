@@ -1,5 +1,5 @@
 const bcrypt = require('bcryptjs');
-const Admin = require('../models/Admin');
+const Account = require('../models/Account');
 const uploadToCloudinary = require('../utils/uploadToCloudinary');
 const uploadLocal = require('../utils/uploadLocal');
 
@@ -10,13 +10,13 @@ const formatAdminProfile = (admin) => ({
     fullName: admin.fullName,
     role: admin.role,
     status: admin.status,
-    avatar: admin.avatar,
+    avatar: admin.profilePicture,
     isEmailVerified: admin.isEmailVerified,
     lastLoginAt: admin.lastLoginAt
 });
 
 const getAdminProfile = async (adminId) => {
-    const admin = await Admin.findById(adminId);
+    const admin = await Account.findOne({ _id: adminId, role: 'ADMIN' });
 
     if (!admin) {
         throw new Error('Admin not found');
@@ -26,14 +26,14 @@ const getAdminProfile = async (adminId) => {
 };
 
 const updateAdminProfile = async (adminId, { fullName, username }, avatarFile) => {
-    const admin = await Admin.findById(adminId);
+    const admin = await Account.findOne({ _id: adminId, role: 'ADMIN' });
 
     if (!admin) {
         throw new Error('Admin not found');
     }
 
     if (username && username !== admin.username) {
-        const existing = await Admin.findOne({ username });
+        const existing = await Account.findOne({ username });
 
         if (existing) {
             throw new Error('Username already in use');
@@ -49,11 +49,11 @@ const updateAdminProfile = async (adminId, { fullName, username }, avatarFile) =
     if (avatarFile) {
         try {
             const { url } = await uploadToCloudinary(avatarFile.buffer, 'busnet/admins');
-            admin.avatar = url;
+            admin.profilePicture = url;
         } catch (err) {
             console.error('[updateAdminProfile] Cloudinary failed, using local storage:', err.message);
             const { url } = uploadLocal(avatarFile.buffer, avatarFile.originalname);
-            admin.avatar = url;
+            admin.profilePicture = url;
         }
     }
 
@@ -63,7 +63,7 @@ const updateAdminProfile = async (adminId, { fullName, username }, avatarFile) =
 };
 
 const changeAdminPassword = async (adminId, { currentPassword, newPassword }) => {
-    const admin = await Admin.findById(adminId).select('+passwordHash');
+    const admin = await Account.findOne({ _id: adminId, role: 'ADMIN' }).select('+passwordHash');
 
     if (!admin) {
         throw new Error('Admin not found');

@@ -1,9 +1,7 @@
 const jwt = require('jsonwebtoken');
-const Admin = require('../models/Admin');
 const Account = require('../models/Account');
 const AppError = require('../utils/AppError');
-const { ADMIN } = require('../constants/roles');
-const { ADMIN_STATUS } = require('../constants/statuses');
+const { ACCOUNT_STATUS } = require('../constants/statuses');
 
 const protect = async (req, res, next) => {
     try {
@@ -19,10 +17,7 @@ const protect = async (req, res, next) => {
         const token = authHeader.split(' ')[1];
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-        const isAdmin = decoded.role === ADMIN;
-        const user = isAdmin
-            ? await Admin.findById(decoded.id)
-            : await Account.findById(decoded.id);
+        const user = await Account.findById(decoded.id);
 
         if (!user) {
             return res.status(401).json({
@@ -31,7 +26,7 @@ const protect = async (req, res, next) => {
             });
         }
 
-        if (isAdmin && user.status !== ADMIN_STATUS.ACTIVE) {
+        if (user.role === 'ADMIN' && user.status === ACCOUNT_STATUS.DISABLED) {
             return res.status(403).json({
                 success: false,
                 message: 'This account has been disabled'

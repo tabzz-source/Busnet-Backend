@@ -15,6 +15,12 @@ const tripSeatSchema = new mongoose.Schema(
             min: 0
         },
 
+        seatType: {
+            type: String,
+            trim: true,
+            default: null
+        },
+
         status: {
             type: String,
             enum: ['AVAILABLE', 'HELD', 'BOOKED', 'CANCELLED', 'LOCKED'],
@@ -24,6 +30,12 @@ const tripSeatSchema = new mongoose.Schema(
         bookingId: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'Booking',
+            default: null
+        },
+
+        holdToken: {
+            type: String,
+            trim: true,
             default: null
         },
 
