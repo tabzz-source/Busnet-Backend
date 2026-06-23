@@ -192,3 +192,69 @@
   "query": {}
 }
 ---NEW_REQUEST---
+{
+  "timestamp": "2026-06-23T15:32:29.140Z",
+  "method": "POST",
+  "url": "/api/sepay/webhook",
+  "headers": {
+    "host": "detrital-nadine-cubicly.ngrok-free.dev",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
+    "content-length": "367",
+    "accept": "*/*",
+    "authorization": "Apikey BUSNET",
+    "content-type": "application/json",
+    "x-forwarded-for": "2600:3c15::2000:8aff:fedd:874b",
+    "x-forwarded-host": "detrital-nadine-cubicly.ngrok-free.dev",
+    "x-forwarded-proto": "https",
+    "accept-encoding": "gzip"
+  },
+  "body": {
+    "gateway": "BIDV",
+    "transactionDate": "2026-06-23 22:32:29",
+    "accountNumber": "7411208853",
+    "subAccount": "96247MF7XE",
+    "code": null,
+    "content": "BUSNET SUB 6a3aa6d8d8913ec276224f4e",
+    "transferType": "in",
+    "description": "BankAPINotify BUSNET SUB 6a3aa6d8d8913ec276224f4e",
+    "transferAmount": 10000,
+    "referenceCode": "68ea98a8-7f76-4da3-b0b3-7870e6169041",
+    "accumulated": 0,
+    "id": 64734579
+  },
+  "query": {}
+}
+---NEW_REQUEST---
+{
+  "timestamp": "2026-06-23T16:45:36.569Z",
+  "method": "POST",
+  "url": "/api/sepay/webhook",
+  "headers": {
+    "host": "detrital-nadine-cubicly.ngrok-free.dev",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
+    "content-length": "367",
+    "accept": "*/*",
+    "authorization": "Apikey BUSNET",
+    "content-type": "application/json",
+    "x-forwarded-for": "171.244.35.2",
+    "x-forwarded-host": "detrital-nadine-cubicly.ngrok-free.dev",
+    "x-forwarded-proto": "https",
+    "accept-encoding": "gzip"
+  },
+  "body": {
+    "gateway": "BIDV",
+    "transactionDate": "2026-06-23 23:45:35",
+    "accountNumber": "7411208853",
+    "subAccount": "96247MF7XE",
+    "code": null,
+    "content": "BUSNET SUB 6a3ab80e20f9f6e9f12b9939",
+    "transferType": "in",
+    "description": "BankAPINotify BUSNET SUB 6a3ab80e20f9f6e9f12b9939",
+    "transferAmount": 10000,
+    "referenceCode": "edc22cf9-94ad-46d3-aa47-01e70f480cae",
+    "accumulated": 0,
+    "id": 64740580
+  },
+  "query": {}
+}
+---NEW_REQUEST---

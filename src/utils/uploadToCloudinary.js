@@ -1,12 +1,15 @@
 const cloudinary = require("../config/cloudinary");
 
-const uploadToCloudinary = (fileBuffer, folder = process.env.CLOUDINARY_FOLDER || "busnet") => {
+const uploadToCloudinary = (fileBuffer, folder = process.env.CLOUDINARY_FOLDER || "busnet", options = {}) => {
   return new Promise((resolve, reject) => {
+    const uploadOptions = {
+      folder,
+      resource_type: options.resource_type || "auto",
+      ...options
+    };
+
     const uploadStream = cloudinary.uploader.upload_stream(
-      {
-        folder,
-        resource_type: "image",
-      },
+      uploadOptions,
       (error, result) => {
         if (error) {
           return reject(error);
@@ -23,4 +26,4 @@ const uploadToCloudinary = (fileBuffer, folder = process.env.CLOUDINARY_FOLDER |
   });
 };
 
-module.exports = uploadToCloudinary;
+module.exports = uploadToCloudinary;

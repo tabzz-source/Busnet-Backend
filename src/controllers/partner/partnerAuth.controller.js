@@ -4,13 +4,50 @@ const { successResponse } = require('../../utils/response');
 
 /**
  * POST /api/partner/auth/register
- * Register a new partner (operator) account
+ * Submit operator registration (Phase 1: Plan + Profile + License)
  */
 const register = asyncHandler(async (req, res) => {
-    const result = await authService.registerOperator(req.body);
+    const result = await authService.submitOperatorRegistration(req.body);
 
     return successResponse(res, 201,
-        'Transit operator registration request created successfully. Please complete the subscription package payment to activate your account.',
+        'Registration submitted successfully. Your business license is under review by our admin team.',
+        result
+    );
+});
+
+/**
+ * POST /api/partner/auth/continue-registration
+ * Continue registration - verify identity and check status
+ */
+const continueRegistration = asyncHandler(async (req, res) => {
+    const { email, password } = req.body;
+    const result = await authService.continueOperatorRegistration(email, password);
+
+    return successResponse(res, 200, 'Registration status retrieved successfully', result);
+});
+
+/**
+ * POST /api/partner/auth/complete-payment
+ * Complete payment (Phase 2: SePay config + create Transaction)
+ */
+const completePayment = asyncHandler(async (req, res) => {
+    const result = await authService.completeOperatorPayment(req.body);
+
+    return successResponse(res, 201,
+        'Payment transaction created successfully. Please complete the subscription payment.',
+        result
+    );
+});
+
+/**
+ * POST /api/partner/auth/resubmit-license
+ * Resubmit business license after rejection
+ */
+const resubmitLicense = asyncHandler(async (req, res) => {
+    const result = await authService.resubmitLicense(req.body);
+
+    return successResponse(res, 200,
+        'Business license resubmitted successfully. Your license is under review again.',
         result
     );
 });
@@ -46,6 +83,9 @@ const login = asyncHandler(async (req, res) => {
 
 module.exports = {
     register,
+    continueRegistration,
+    completePayment,
+    resubmitLicense,
     sendVerificationOTP,
     verifyOTP,
     login
