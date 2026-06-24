@@ -156,6 +156,49 @@ const sendPartnerWelcomeEmail = async (email, operatorName, loginUrl) => {
 };
 
 /**
+ * Send Booking Confirmation Email after successful payment
+ * @param {object} params
+ * @param {string} params.email - Recipient email
+ * @param {string} params.customerName - Customer/passenger name
+ * @param {string} params.bookingCode - Booking code
+ * @param {string} params.tripCode - Trip code
+ * @param {string|Date} params.departureDate - Departure date
+ * @param {string|number} params.departureTime - Departure time or time label
+ * @param {Array<string>} params.seatCodes - Seat codes
+ * @param {number} params.total - Total amount
+ * @param {string} [params.passengerPhone] - Passenger phone
+ * @param {string} [params.pickupPoint] - Pickup point summary
+ * @param {string} [params.dropoffPoint] - Dropoff point summary
+ */
+const sendBookingConfirmationEmail = async (params = {}) => {
+    const {
+        email,
+        customerName = 'Customer',
+        bookingCode,
+        tripCode = 'N/A',
+        departureDate,
+        departureTime = null,
+        seatCodes = [],
+        total = 0,
+        passengerPhone = '',
+        pickupPoint = '',
+        dropoffPoint = ''
+    } = params;
+
+    const formatDateTime = (value) => {
+        if (!value) return 'N/A';
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return String(value);
+        return date.toLocaleString('en-GB', {
+            timeZone: 'Asia/Bangkok',
+            hour12: false
+        });
+    };
+
+    const safeSeatList = seatCodes.length > 0 ? seatCodes.join(', ') : 'N/A';
+    const safeDeparture = departureTime !== null && departureTime !== undefined
+        ? `${formatDateTime(departureDate)}${departureTime !== null ? ` (${departureTime})` : ''}`
+        : formatDateTime(departureDate);
  * Send Pending Approval Email to Partner after successful payment
  * @param {string} email - Destination email
  * @param {string} operatorName - Partner operator name
@@ -213,6 +256,66 @@ const sendLicenseApprovedEmail = async (email, operatorName) => {
     const mailOptions = {
         from: process.env.EMAIL_FROM || '"BusNet" <no-reply@busnet.com>',
         to: email,
+        subject: `[BusNet] Booking confirmed - ${bookingCode || 'Your trip'}`,
+        html: `
+            <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 640px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 14px; background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);">
+                <div style="text-align: center; border-bottom: 2px solid #2563eb; padding-bottom: 18px; margin-bottom: 24px;">
+                    <h1 style="color: #0f172a; margin: 0; font-size: 30px; letter-spacing: 1px;">BusNet</h1>
+                    <p style="color: #64748b; margin: 6px 0 0 0; font-size: 14px;">Your booking has been confirmed successfully</p>
+                </div>
+
+                <div style="padding: 0 4px;">
+                    <h2 style="color: #0f172a; margin: 0 0 10px 0; font-size: 22px;">Hello ${customerName},</h2>
+                    <p style="color: #334155; line-height: 1.6; font-size: 16px; margin-top: 0;">
+                        Your payment has been received and your booking is now confirmed. Below are your booking details.
+                    </p>
+
+                    <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 12px; padding: 18px 20px; margin: 22px 0;">
+                        <div style="font-size: 14px; color: #1d4ed8; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">Booking Code</div>
+                        <div style="font-family: monospace; font-size: 26px; font-weight: 700; color: #1e40af;">${bookingCode || 'N/A'}</div>
+                    </div>
+
+                    <table style="width: 100%; border-collapse: collapse; margin-bottom: 22px;">
+                        <tr>
+                            <td style="padding: 10px 0; color: #64748b; width: 34%; vertical-align: top;">Trip Code</td>
+                            <td style="padding: 10px 0; color: #0f172a; font-weight: 600;">${tripCode}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 10px 0; color: #64748b; vertical-align: top;">Departure</td>
+                            <td style="padding: 10px 0; color: #0f172a; font-weight: 600;">${safeDeparture}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 10px 0; color: #64748b; vertical-align: top;">Seats</td>
+                            <td style="padding: 10px 0; color: #0f172a; font-weight: 600;">${safeSeatList}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 10px 0; color: #64748b; vertical-align: top;">Total</td>
+                            <td style="padding: 10px 0; color: #0f172a; font-weight: 700;">${Number(total || 0).toLocaleString('en-US')} VND</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 10px 0; color: #64748b; vertical-align: top;">Passenger</td>
+                            <td style="padding: 10px 0; color: #0f172a; font-weight: 600;">${customerName}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 10px 0; color: #64748b; vertical-align: top;">Phone</td>
+                            <td style="padding: 10px 0; color: #0f172a; font-weight: 600;">${passengerPhone || 'N/A'}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 10px 0; color: #64748b; vertical-align: top;">Pickup</td>
+                            <td style="padding: 10px 0; color: #0f172a; font-weight: 600;">${pickupPoint || 'N/A'}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 10px 0; color: #64748b; vertical-align: top;">Dropoff</td>
+                            <td style="padding: 10px 0; color: #0f172a; font-weight: 600;">${dropoffPoint || 'N/A'}</td>
+                        </tr>
+                    </table>
+
+                    <div style="background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 12px; padding: 16px 18px; color: #065f46; line-height: 1.6;">
+                        Please keep this email for your reference when boarding. If you need to check your booking again, you can use your booking code in the BusNet app or website.
+                    </div>
+                </div>
+
+                <div style="margin-top: 28px; padding-top: 18px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 12px; color: #94a3b8;">
         subject: '[BusNet] Business License Approved - Complete Your Registration',
         html: `
             <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);">
@@ -310,6 +413,7 @@ module.exports = {
     sendVerificationEmail,
     sendPasswordResetEmail,
     sendPartnerWelcomeEmail,
+    sendBookingConfirmationEmail
     sendPartnerPendingApprovalEmail,
     sendLicenseApprovedEmail,
     sendLicenseRejectedEmail

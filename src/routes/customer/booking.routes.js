@@ -15,6 +15,10 @@ router.get('/:bookingCode/payment', authenticate, customerBookingController.getB
 
 router.post('/:bookingCode/cancel', authenticate, customerBookingController.cancelBooking);
 
+router.get('/:bookingCode/tickets/pdf', authenticate, customerBookingController.getBookingTicketsPdf);
+
+router.get('/:bookingCode/tickets', authenticate, customerBookingController.getBookingTickets);
+
 router.get('/:bookingCode', authenticate, customerBookingController.getBookingDetail);
 
 module.exports = router;
