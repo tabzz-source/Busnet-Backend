@@ -283,6 +283,7 @@ const updatePartnerProfileByAccountId = async (accountId, data, files = {}) => {
         'bankAccountName',
         'bankNumber',
         'bankBranch',
+        'sepayVa',
         'taxCode'
     ];
     const hasBodyUpdates = updatableFields.some((field) => data[field] !== undefined);
@@ -337,7 +338,7 @@ const updatePartnerProfileByAccountId = async (accountId, data, files = {}) => {
         profile.policies = _parseObjectField(data.policies, 'policies');
     }
 
-    ['bankName', 'bankAccountName', 'bankNumber', 'bankBranch', 'taxCode'].forEach((field) => {
+    ['bankName', 'bankAccountName', 'bankNumber', 'bankBranch', 'sepayVa', 'taxCode'].forEach((field) => {
         if (data[field] !== undefined) {
             profile[field] = data[field] || null;
         }
