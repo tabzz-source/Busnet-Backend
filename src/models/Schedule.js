@@ -104,6 +104,11 @@ const scheduleSchema = new mongoose.Schema(
             default: []
         },
 
+        operationNotes: {
+            type: String,
+            default: ''
+        },
+
         isActive: {
             type: Boolean,
             default: true

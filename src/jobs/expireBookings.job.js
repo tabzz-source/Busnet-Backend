@@ -1,1 +1,5 @@
-// src/jobs/expireBookings.job.js
+const bookingService = require('../services/booking.service');
+
+const expireBookingsJob = async () => bookingService.expireStaleBookings();
+
+module.exports = expireBookingsJob;

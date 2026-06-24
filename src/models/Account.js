@@ -38,7 +38,7 @@ const accountSchema = new mongoose.Schema(
 
         status: {
             type: String,
-            enum: ['UNVERIFIED', 'ACTIVE', 'DELETED', 'BANNED', 'PENDING_APPROVAL'],
+            enum: ['UNVERIFIED', 'ACTIVE', 'DELETED', 'BANNED', 'PENDING_APPROVAL', 'DISABLED'],
             default: 'UNVERIFIED'
         },
 
@@ -92,6 +92,11 @@ const accountSchema = new mongoose.Schema(
             type: Boolean,
             default: false
         },
+        lastLoginAt: {
+            type: Date,
+            default: null
+        },
+
         deletedAt: {
             type: Date,
             default: null

@@ -67,7 +67,9 @@ const partnerInformationSchema = new mongoose.Schema(
 
         sepayVa: {
             type: String,
-            trim: true
+            trim: true,
+            unique: true,
+            sparse: true
         },
 
         sepayKeyEncrypted: {
@@ -77,6 +79,34 @@ const partnerInformationSchema = new mongoose.Schema(
 
         businessLicense: {
             type: String,
+            default: null
+        },
+
+        licenseStatus: {
+            type: String,
+            enum: ['PENDING', 'APPROVED', 'REJECTED'],
+            default: 'PENDING'
+        },
+
+        rejectionReason: {
+            type: String,
+            default: null
+        },
+
+        reviewedBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Account',
+            default: null
+        },
+
+        reviewedAt: {
+            type: Date,
+            default: null
+        },
+
+        selectedPlanId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'SubscriptionPlan',
             default: null
         },
 
