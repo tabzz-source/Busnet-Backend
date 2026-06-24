@@ -228,26 +228,6 @@ const registerOperatorRules = [
         .trim()
         .notEmpty().withMessage('Tax code is required'),
 
-    body('bankName')
-        .trim()
-        .notEmpty().withMessage('Bank name is required'),
-
-    body('bankNumber')
-        .trim()
-        .notEmpty().withMessage('Bank account number is required'),
-
-    body('bankAccountName')
-        .trim()
-        .notEmpty().withMessage('Bank account holder name is required'),
-
-    body('sepayVa')
-        .trim()
-        .notEmpty().withMessage('SePay VA is required'),
-
-    body('sepayKey')
-        .trim()
-        .notEmpty().withMessage('SePay API Key is required'),
-
     body('planId')
         .trim()
         .notEmpty().withMessage('Subscription plan is required')
@@ -275,10 +255,79 @@ const registerOperatorRules = [
 
     body('coverImage')
         .optional()
+        .trim(),
+
+    body('businessLicense')
         .trim()
+        .notEmpty().withMessage('Business license is required')
+        .isURL().withMessage('Business license must be a valid URL')
 ];
 
 const validateRegisterOperator = (req, res, next) => runValidation(req, res, next, registerOperatorRules);
+
+const continueRegistrationRules = [
+    body('email')
+        .trim()
+        .notEmpty().withMessage('Email is required')
+        .isEmail().withMessage('Invalid email format')
+        .normalizeEmail(),
+
+    body('password')
+        .notEmpty().withMessage('Password is required')
+];
+
+const validateContinueRegistration = (req, res, next) => runValidation(req, res, next, continueRegistrationRules);
+
+const completePaymentRules = [
+    body('email')
+        .trim()
+        .notEmpty().withMessage('Email is required')
+        .isEmail().withMessage('Invalid email format')
+        .normalizeEmail(),
+
+    body('password')
+        .notEmpty().withMessage('Password is required'),
+
+    body('bankName')
+        .trim()
+        .notEmpty().withMessage('Bank name is required'),
+
+    body('bankNumber')
+        .trim()
+        .notEmpty().withMessage('Bank account number is required'),
+
+    body('bankAccountName')
+        .trim()
+        .notEmpty().withMessage('Bank account holder name is required'),
+
+    body('sepayVa')
+        .trim()
+        .notEmpty().withMessage('SePay VA is required'),
+
+    body('sepayKey')
+        .trim()
+        .notEmpty().withMessage('SePay API Key is required')
+];
+
+const validateCompletePayment = (req, res, next) => runValidation(req, res, next, completePaymentRules);
+
+const resubmitLicenseRules = [
+    body('email')
+        .trim()
+        .notEmpty().withMessage('Email is required')
+        .isEmail().withMessage('Invalid email format')
+        .normalizeEmail(),
+
+    body('password')
+        .notEmpty().withMessage('Password is required'),
+
+    body('businessLicense')
+        .trim()
+        .notEmpty().withMessage('Business license is required')
+        .isURL().withMessage('Business license must be a valid URL')
+];
+
+const validateResubmitLicense = (req, res, next) => runValidation(req, res, next, resubmitLicenseRules);
 
 // ============================
 // Admin auth validations (express-validator chains, used with `validate` middleware)
@@ -319,6 +368,9 @@ module.exports = {
     validateChangePassword,
     validateLogin,
     validateRegisterOperator,
+    validateContinueRegistration,
+    validateCompletePayment,
+    validateResubmitLicense,
     forgotPasswordValidation,
     resetPasswordValidation,
     verifyEmailValidation

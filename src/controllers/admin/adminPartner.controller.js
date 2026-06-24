@@ -28,9 +28,30 @@ const deletePartner = asyncHandler(async (req, res) => {
     return successResponse(res, 200, result.message);
 });
 
+// ============================
+// PENDING REGISTRATION MANAGEMENT
+// ============================
+
+const getPendingRegistrations = asyncHandler(async (req, res) => {
+    const { status, search, page, limit } = req.query;
+    const result = await partnerService.getPendingRegistrations({ status, search, page, limit });
+
+    return successResponse(res, 200, 'Pending registrations fetched successfully', result);
+});
+
+const reviewPendingRegistration = asyncHandler(async (req, res) => {
+    const { status, rejectionReason } = req.body;
+    const result = await partnerService.reviewPendingRegistration(req.params.id, { status, rejectionReason }, req.user._id);
+
+    const action = status === 'APPROVED' ? 'approved' : 'rejected';
+    return successResponse(res, 200, `Registration ${action} successfully`, result);
+});
+
 module.exports = {
     getPartners,
     getPartnerDetail,
     updatePartnerStatus,
-    deletePartner
+    deletePartner,
+    getPendingRegistrations,
+    reviewPendingRegistration
 };
