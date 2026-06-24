@@ -649,21 +649,20 @@ const resetPassword = async (email, code, newPassword) => {
 };
 
 /**
- * Register a new partner/operator account
- * @param {object} data - Operator registration data
- * @returns {object} { account, partnerInfo, transaction }
+ * Phase 1: Submit operator registration (Plan + Profile + License)
+ * Creates Account (PENDING_APPROVAL) + PartnerInformation (licenseStatus: PENDING)
+ * @param {object} data - Operator registration data (no bank/SePay info yet)
+ * @returns {object} { account, partnerInfo }
  */
-const registerOperator = async (data) => {
+const submitOperatorRegistration = async (data) => {
     const SubscriptionPlan = require('../models/SubscriptionPlan');
-    const Transaction = require('../models/Transaction');
-    const sepayCrypto = require('../utils/sepayCrypto');
+    const PartnerInformation = require('../models/PartnerInformation');
 
     const {
         email, password, fullName, phone,
-        operatorName, taxCode,
-        bankName, bankNumber, bankAccountName, bankBranch,
-        sepayVa, sepayKey, planId,
-        operatorPhone, description, amenities, policies, profilePicture, coverImage
+        operatorName, taxCode, planId,
+        operatorPhone, description, amenities, policies,
+        profilePicture, coverImage, businessLicense
     } = data;
 
     // 1. Verify plan exists and is active
@@ -683,9 +682,185 @@ const registerOperator = async (data) => {
         throw new AppError('This phone number is already registered', 409);
     }
 
-    // 3. Validate sepayVa uniqueness in PartnerInformation
+    // 3. Hash password
+    const passwordHash = await bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
+
+    // 4. Generate unique username
+    let baseUsername = email.split('@')[0];
+    let username = baseUsername;
+    let isUsernameTaken = await Account.findOne({ username, deletedAt: null });
+    let counter = 1;
+    while (isUsernameTaken) {
+        username = `${baseUsername}${counter}`;
+        isUsernameTaken = await Account.findOne({ username, deletedAt: null });
+        counter++;
+    }
+
+    // 5. Create Account with PENDING_APPROVAL status
+    const account = await Account.create({
+        username,
+        email: email.toLowerCase(),
+        phone,
+        passwordHash,
+        fullName,
+        role: 'PARTNER',
+        status: 'PENDING_APPROVAL',
+        isEmailVerified: true,
+        isPhoneVerified: false
+    });
+
+    // 6. Create PartnerInformation with licenseStatus PENDING
+    const partnerInfo = await PartnerInformation.create({
+        accountId: account._id,
+        operatorName,
+        operatorPhone: operatorPhone || phone,
+        taxCode,
+        description: description || '',
+        amenities: amenities || [],
+        policies: policies || {},
+        profilePicture: profilePicture || null,
+        coverImage: coverImage || null,
+        businessLicense: businessLicense || null,
+        licenseStatus: 'PENDING',
+        selectedPlanId: plan._id,
+        isVerified: false,
+        verifiedAt: null
+    });
+
+    // 7. Send pending approval email
+    const emailService = require('./email.service');
+    emailService.sendPartnerPendingApprovalEmail(account.email, partnerInfo.operatorName)
+        .then(() => console.log(`[Registration] Pending approval email sent to ${account.email}`))
+        .catch((err) => console.error(`[Registration] Error sending pending approval email:`, err));
+
+    return {
+        account: {
+            _id: account._id,
+            email: account.email,
+            phone: account.phone,
+            fullName: account.fullName,
+            role: account.role,
+            status: account.status
+        },
+        partnerInfo: {
+            _id: partnerInfo._id,
+            operatorName: partnerInfo.operatorName,
+            taxCode: partnerInfo.taxCode,
+            licenseStatus: partnerInfo.licenseStatus
+        }
+    };
+};
+
+/**
+ * Continue operator registration - verify identity and return current status
+ * @param {string} email
+ * @param {string} password
+ * @returns {object} { status, licenseStatus, rejectionReason, account, partnerInfo }
+ */
+const continueOperatorRegistration = async (email, password) => {
     const PartnerInformation = require('../models/PartnerInformation');
-    const existingPartnerInfo = await PartnerInformation.findOne({ sepayVa });
+
+    if (!email || !password) {
+        throw new AppError('Email and password are required', 400);
+    }
+
+    // 1. Find account with PENDING_APPROVAL status
+    const account = await Account.findOne({
+        email: email.toLowerCase(),
+        role: 'PARTNER',
+        status: 'PENDING_APPROVAL',
+        deletedAt: null
+    }).select('+passwordHash');
+
+    if (!account) {
+        throw new AppError('No pending registration found for this email', 404);
+    }
+
+    // 2. Verify password
+    if (!account.passwordHash) {
+        throw new AppError('Account does not have a password set', 400);
+    }
+
+    const isMatch = await bcrypt.compare(password, account.passwordHash);
+    if (!isMatch) {
+        throw new AppError('Incorrect password', 401);
+    }
+
+    // 3. Get partner information
+    const partnerInfo = await PartnerInformation.findOne({ accountId: account._id });
+    if (!partnerInfo) {
+        throw new AppError('Partner information not found', 404);
+    }
+
+    return {
+        accountStatus: account.status,
+        licenseStatus: partnerInfo.licenseStatus,
+        rejectionReason: partnerInfo.rejectionReason || null,
+        account: {
+            _id: account._id,
+            email: account.email,
+            phone: account.phone,
+            fullName: account.fullName
+        },
+        partnerInfo: {
+            _id: partnerInfo._id,
+            operatorName: partnerInfo.operatorName,
+            businessLicense: partnerInfo.businessLicense,
+            selectedPlanId: partnerInfo.selectedPlanId
+        }
+    };
+};
+
+/**
+ * Phase 2: Complete operator payment (after license approved)
+ * Receives SePay/bank config → creates Transaction with QR code
+ * @param {object} data - { email, password, bankName, bankNumber, bankAccountName, bankBranch, sepayVa, sepayKey }
+ * @returns {object} { transaction }
+ */
+const completeOperatorPayment = async (data) => {
+    const SubscriptionPlan = require('../models/SubscriptionPlan');
+    const Transaction = require('../models/Transaction');
+    const PartnerInformation = require('../models/PartnerInformation');
+    const sepayCrypto = require('../utils/sepayCrypto');
+
+    const {
+        email, password,
+        bankName, bankNumber, bankAccountName, bankBranch,
+        sepayVa, sepayKey
+    } = data;
+
+    // 1. Verify identity
+    const account = await Account.findOne({
+        email: email.toLowerCase(),
+        role: 'PARTNER',
+        status: 'PENDING_APPROVAL',
+        deletedAt: null
+    }).select('+passwordHash');
+
+    if (!account) {
+        throw new AppError('No pending registration found for this email', 404);
+    }
+
+    const isMatch = await bcrypt.compare(password, account.passwordHash);
+    if (!isMatch) {
+        throw new AppError('Incorrect password', 401);
+    }
+
+    // 2. Check license is approved
+    const partnerInfo = await PartnerInformation.findOne({ accountId: account._id });
+    if (!partnerInfo) {
+        throw new AppError('Partner information not found', 404);
+    }
+
+    if (partnerInfo.licenseStatus !== 'APPROVED') {
+        throw new AppError('Business license has not been approved yet', 403);
+    }
+
+    // 3. Validate sepayVa uniqueness
+    const existingPartnerInfo = await PartnerInformation.findOne({
+        sepayVa,
+        _id: { $ne: partnerInfo._id }
+    });
     if (existingPartnerInfo) {
         const associatedAccount = await Account.findOne({ _id: existingPartnerInfo.accountId, deletedAt: null });
         if (associatedAccount) {
@@ -693,17 +868,27 @@ const registerOperator = async (data) => {
         }
     }
 
-    // Hash password and encrypt sepayKey
-    const passwordHash = await bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
+    // 4. Update PartnerInformation with bank/SePay details
     const encryptedSepayKey = sepayCrypto.encrypt(sepayKey);
+    partnerInfo.bankName = bankName;
+    partnerInfo.bankNumber = bankNumber;
+    partnerInfo.bankAccountName = bankAccountName;
+    partnerInfo.bankBranch = bankBranch || '';
+    partnerInfo.sepayVa = sepayVa;
+    partnerInfo.sepayKeyEncrypted = encryptedSepayKey;
+    await partnerInfo.save();
 
-    // Calculate subscription amount
+    // 5. Get plan and calculate amount
+    const plan = await SubscriptionPlan.findOne({ _id: partnerInfo.selectedPlanId, status: 'ACTIVE' });
+    if (!plan) {
+        throw new AppError('Selected subscription plan is no longer available', 404);
+    }
+
     const amount = Math.round(plan.price - (plan.price * plan.discount / 100));
 
-    // Create Transaction (status: PENDING, type: SUBSCRIPTION_PAYMENT)
-    // We store all partner registration details inside transaction.metadata to defer write until paid
+    // 6. Create Transaction
     const transaction = await Transaction.create({
-        partnerId: null,
+        partnerId: account._id,
         subscriptionId: null,
         transactionType: 'SUBSCRIPTION_PAYMENT',
         amount,
@@ -712,53 +897,21 @@ const registerOperator = async (data) => {
         gateway: 'SEPAY',
         description: `Subscription package payment`,
         metadata: {
-            email: email.toLowerCase(),
-            passwordHash,
-            fullName,
-            phone,
-            operatorName,
-            taxCode,
-            bankName,
-            bankNumber,
-            bankAccountName,
-            bankBranch: bankBranch || '',
-            sepayVa,
-            sepayKeyEncrypted: encryptedSepayKey,
-            planId: plan._id,
-            operatorPhone: operatorPhone || phone,
-            description: description || '',
-            amenities: amenities || [],
-            policies: policies || {},
-            profilePicture: profilePicture || null,
-            coverImage: coverImage || null
+            planId: plan._id
         }
     });
 
-    // Generate reference code for transaction
+    // Generate reference code
     transaction.code = `BUSNET_SUB_${transaction._id}`;
     transaction.content = `BUSNET SUB ${transaction._id}`;
     await transaction.save();
 
-    // Prepare VietQR payment QR URL
+    // 7. Prepare VietQR payment QR URL
     const adminVa = process.env.ADMIN_SEPAY_VA || '7411208853';
     const adminBank = process.env.ADMIN_SEPAY_BANK || 'BIDV';
     const qrUrl = `https://qr.sepay.vn/img?acc=${adminVa}&bank=${adminBank}&amount=${transaction.amount}&des=${transaction.content}`;
 
     return {
-        account: {
-            _id: null,
-            email: email.toLowerCase(),
-            phone,
-            fullName,
-            role: 'PARTNER',
-            status: 'UNVERIFIED'
-        },
-        partnerInfo: {
-            _id: null,
-            operatorName,
-            taxCode,
-            sepayVa
-        },
         transaction: {
             _id: transaction._id,
             amount: transaction.amount,
@@ -767,6 +920,71 @@ const registerOperator = async (data) => {
             qrUrl,
             adminBank,
             adminVa
+        }
+    };
+};
+
+/**
+ * Resubmit business license after rejection
+ * @param {object} data - { email, password, businessLicense }
+ * @returns {object} { partnerInfo }
+ */
+const resubmitLicense = async (data) => {
+    const PartnerInformation = require('../models/PartnerInformation');
+
+    const { email, password, businessLicense } = data;
+
+    if (!email || !password || !businessLicense) {
+        throw new AppError('Email, password and business license are required', 400);
+    }
+
+    // 1. Verify identity
+    const account = await Account.findOne({
+        email: email.toLowerCase(),
+        role: 'PARTNER',
+        status: 'PENDING_APPROVAL',
+        deletedAt: null
+    }).select('+passwordHash');
+
+    if (!account) {
+        throw new AppError('No pending registration found for this email', 404);
+    }
+
+    const isMatch = await bcrypt.compare(password, account.passwordHash);
+    if (!isMatch) {
+        throw new AppError('Incorrect password', 401);
+    }
+
+    // 2. Get partner information
+    const partnerInfo = await PartnerInformation.findOne({ accountId: account._id });
+    if (!partnerInfo) {
+        throw new AppError('Partner information not found', 404);
+    }
+
+    if (partnerInfo.licenseStatus !== 'REJECTED') {
+        throw new AppError('License can only be resubmitted after rejection', 400);
+    }
+
+    // 3. Update license and reset status to PENDING
+    partnerInfo.businessLicense = businessLicense;
+    partnerInfo.licenseStatus = 'PENDING';
+    partnerInfo.rejectionReason = null;
+    partnerInfo.reviewedBy = null;
+    partnerInfo.reviewedAt = null;
+    await partnerInfo.save();
+
+    // 4. Send pending approval email
+    const emailService = require('./email.service');
+    emailService.sendPartnerPendingApprovalEmail(account.email, partnerInfo.operatorName)
+        .then(() => console.log(`[Registration] Re-submission pending approval email sent to ${account.email}`))
+        .catch((err) => console.error(`[Registration] Error sending pending approval email:`, err));
+
+    return {
+        partnerInfo: {
+            _id: partnerInfo._id,
+            operatorName: partnerInfo.operatorName,
+            businessLicense: partnerInfo.businessLicense,
+            licenseStatus: partnerInfo.licenseStatus
         }
     };
 };
@@ -1245,7 +1463,10 @@ module.exports = {
     forgotPassword,
     verifyResetCode,
     resetPassword,
-    registerOperator,
+    submitOperatorRegistration,
+    continueOperatorRegistration,
+    completeOperatorPayment,
+    resubmitLicense,
     sendPartnerVerificationOTP,
     verifyPartnerOTP,
     loginPartner,

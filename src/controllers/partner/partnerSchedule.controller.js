@@ -30,4 +30,25 @@ const getBuses = asyncHandler(async (req, res) => {
     return successResponse(res, 200, 'Buses fetched successfully', buses);
 });
 
-module.exports = { createSchedule, getSchedules, getRoutes, getBuses };
+const getScheduleDetail = asyncHandler(async (req, res) => {
+    const partnerId = req.user.id;
+    const { id } = req.params;
+    const result = await scheduleService.getScheduleById(partnerId, id);
+    return successResponse(res, 200, 'Schedule fetched successfully', result);
+});
+
+const updateSchedule = asyncHandler(async (req, res) => {
+    const partnerId = req.user.id;
+    const { id } = req.params;
+    const result = await scheduleService.updateSchedule(partnerId, id, req.body);
+    return successResponse(res, 200, 'Schedule updated successfully', result);
+});
+
+const deleteSchedule = asyncHandler(async (req, res) => {
+    const partnerId = req.user.id;
+    const { id } = req.params;
+    const result = await scheduleService.deleteSchedule(partnerId, id);
+    return successResponse(res, 200, 'Schedule deleted successfully', result);
+});
+
+module.exports = { createSchedule, getSchedules, getScheduleDetail, updateSchedule, deleteSchedule, getRoutes, getBuses };

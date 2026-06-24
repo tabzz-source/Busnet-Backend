@@ -9,7 +9,7 @@ const MOCK_PLANS = [
     planName: 'Basic Coach',
     code: 'BASIC',
     description: 'Perfect for local bus operators starting to manage their routes and trips digitally.',
-    price: 500000,
+    price: 5000,
     durationDays: 30,
     discount: 0,
     planFeatures: [
@@ -28,7 +28,7 @@ const MOCK_PLANS = [
     planName: 'Professional Fleet',
     code: 'PRO',
     description: 'Designed for growing transit operators seeking wider coverage, detailed reports, and larger fleets.',
-    price: 1200000,
+    price: 10000,
     durationDays: 30,
     discount: 0,
     planFeatures: [

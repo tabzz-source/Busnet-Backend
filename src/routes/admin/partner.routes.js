@@ -13,6 +13,11 @@ const router = express.Router();
 
 router.use(protect, restrictTo(ADMIN));
 
+// Pending Registration Management
+router.get('/pending-registrations', adminPartnerController.getPendingRegistrations);
+router.patch('/pending-registrations/:id/review', adminPartnerController.reviewPendingRegistration);
+
+// Partner Management
 router.get('/', adminPartnerController.getPartners);
 router.get('/:id', partnerIdValidation, validate, adminPartnerController.getPartnerDetail);
 router.patch('/:id/status', updatePartnerStatusValidation, validate, adminPartnerController.updatePartnerStatus);

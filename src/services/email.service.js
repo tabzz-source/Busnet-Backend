@@ -199,6 +199,59 @@ const sendBookingConfirmationEmail = async (params = {}) => {
     const safeDeparture = departureTime !== null && departureTime !== undefined
         ? `${formatDateTime(departureDate)}${departureTime !== null ? ` (${departureTime})` : ''}`
         : formatDateTime(departureDate);
+ * Send Pending Approval Email to Partner after successful payment
+ * @param {string} email - Destination email
+ * @param {string} operatorName - Partner operator name
+ */
+const sendPartnerPendingApprovalEmail = async (email, operatorName) => {
+    const mailOptions = {
+        from: process.env.EMAIL_FROM || '"BusNet" <no-reply@busnet.com>',
+        to: email,
+        subject: '[BusNet] Payment Received - Account Verification Pending',
+        html: `
+            <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);">
+                <div style="text-align: center; border-bottom: 2px solid #f59e0b; padding-bottom: 20px; margin-bottom: 25px;">
+                    <h1 style="color: #78350f; margin: 0; font-size: 28px; letter-spacing: 1px; font-weight: 800;">BusNet</h1>
+                    <p style="color: #b45309; margin: 5px 0 0 0; font-size: 14px; font-weight: 500;">Smart Bus Operator Platform</p>
+                </div>
+                <div style="padding: 10px 10px;">
+                    <h2 style="color: #0f172a; margin-top: 0; font-size: 22px; font-weight: 700; text-align: center;">Subscription Payment Verified</h2>
+                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
+                        Dear <strong>${operatorName}</strong>,
+                    </p>
+                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
+                        We have successfully verified your subscription payment. Thank you for choosing BusNet!
+                    </p>
+                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
+                        Your account is currently in a <strong>Pending Approval</strong> state while our administrative team reviews your uploaded Business License. This verification process typically takes up to 24 hours.
+                    </p>
+                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
+                        Once approved, you will receive a confirmation email indicating that your account has been fully activated, and you will be able to log in and start configuring your workspace.
+                    </p>
+                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
+                        If you have any questions or need to provide additional details, please reply directly to this email or contact our support team.
+                    </p>
+                </div>
+                <div style="margin-top: 35px; padding-top: 20px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 12px; color: #94a3b8;">
+                    <p style="margin: 0 0 5px 0;">&copy; ${new Date().getFullYear()} BusNet Project. All rights reserved.</p>
+                    <p style="margin: 0;">This is an automated email. Please do not reply to this message.</p>
+                </div>
+            </div>
+        `
+    };
+
+    return transporter.sendMail(mailOptions);
+};
+
+/**
+ * Send License Approved Email to Partner
+ * @param {string} email - Destination email
+ * @param {string} operatorName - Partner operator name
+ */
+const sendLicenseApprovedEmail = async (email, operatorName) => {
+    const registerUrl = process.env.CUSTOMER_WEB_URL
+        ? `${process.env.CUSTOMER_WEB_URL}/register-operator`
+        : 'http://localhost:5174/register-operator';
 
     const mailOptions = {
         from: process.env.EMAIL_FROM || '"BusNet" <no-reply@busnet.com>',
@@ -263,6 +316,89 @@ const sendBookingConfirmationEmail = async (params = {}) => {
                 </div>
 
                 <div style="margin-top: 28px; padding-top: 18px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 12px; color: #94a3b8;">
+        subject: '[BusNet] Business License Approved - Complete Your Registration',
+        html: `
+            <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);">
+                <div style="text-align: center; border-bottom: 2px solid #10b981; padding-bottom: 20px; margin-bottom: 25px;">
+                    <h1 style="color: #064e3b; margin: 0; font-size: 28px; letter-spacing: 1px; font-weight: 800;">BusNet</h1>
+                    <p style="color: #047857; margin: 5px 0 0 0; font-size: 14px; font-weight: 500;">Smart Bus Operator Platform</p>
+                </div>
+                <div style="padding: 10px 10px;">
+                    <h2 style="color: #0f172a; margin-top: 0; font-size: 22px; font-weight: 700; text-align: center;">Business License Approved! ✅</h2>
+                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
+                        Dear <strong>${operatorName}</strong>,
+                    </p>
+                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
+                        Great news! Your business license has been reviewed and <strong style="color: #10b981;">approved</strong> by our administrative team.
+                    </p>
+                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
+                        You can now continue your registration by completing the payment setup. Please visit the registration page and use the <strong>"Continue Registration"</strong> option with your registered email.
+                    </p>
+                    <div style="text-align: center; margin: 35px 0;">
+                        <a href="${registerUrl}" style="display: inline-block; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: #ffffff; text-decoration: none; padding: 14px 35px; font-size: 16px; font-weight: bold; border-radius: 8px; box-shadow: 0 4px 10px rgba(16, 185, 129, 0.3);">
+                            CONTINUE REGISTRATION
+                        </a>
+                    </div>
+                    <p style="color: #64748b; font-size: 14px; line-height: 1.6; margin-top: 25px;">
+                        If the button above does not work, copy and paste this link into your browser: <br/>
+                        <a href="${registerUrl}" style="color: #10b981; word-break: break-all;">${registerUrl}</a>
+                    </p>
+                </div>
+                <div style="margin-top: 35px; padding-top: 20px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 12px; color: #94a3b8;">
+                    <p style="margin: 0 0 5px 0;">&copy; ${new Date().getFullYear()} BusNet Project. All rights reserved.</p>
+                    <p style="margin: 0;">This is an automated email. Please do not reply to this message.</p>
+                </div>
+            </div>
+        `
+    };
+
+    return transporter.sendMail(mailOptions);
+};
+
+/**
+ * Send License Rejected Email to Partner
+ * @param {string} email - Destination email
+ * @param {string} operatorName - Partner operator name
+ * @param {string} rejectionReason - Reason for rejection
+ */
+const sendLicenseRejectedEmail = async (email, operatorName, rejectionReason) => {
+    const registerUrl = process.env.CUSTOMER_WEB_URL
+        ? `${process.env.CUSTOMER_WEB_URL}/register-operator`
+        : 'http://localhost:5174/register-operator';
+
+    const mailOptions = {
+        from: process.env.EMAIL_FROM || '"BusNet" <no-reply@busnet.com>',
+        to: email,
+        subject: '[BusNet] Business License Review - Action Required',
+        html: `
+            <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);">
+                <div style="text-align: center; border-bottom: 2px solid #ef4444; padding-bottom: 20px; margin-bottom: 25px;">
+                    <h1 style="color: #7f1d1d; margin: 0; font-size: 28px; letter-spacing: 1px; font-weight: 800;">BusNet</h1>
+                    <p style="color: #dc2626; margin: 5px 0 0 0; font-size: 14px; font-weight: 500;">Smart Bus Operator Platform</p>
+                </div>
+                <div style="padding: 10px 10px;">
+                    <h2 style="color: #0f172a; margin-top: 0; font-size: 22px; font-weight: 700; text-align: center;">Business License Not Approved</h2>
+                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
+                        Dear <strong>${operatorName}</strong>,
+                    </p>
+                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
+                        Unfortunately, your business license could not be approved at this time. Our administrative team has provided the following reason:
+                    </p>
+                    <div style="background-color: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 15px 20px; margin: 20px 0;">
+                        <p style="color: #991b1b; font-size: 15px; font-weight: 600; margin: 0;">
+                            📋 Reason: ${rejectionReason}
+                        </p>
+                    </div>
+                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
+                        You can resubmit your business license by visiting the registration page and using the <strong>"Continue Registration"</strong> option with your registered email.
+                    </p>
+                    <div style="text-align: center; margin: 35px 0;">
+                        <a href="${registerUrl}" style="display: inline-block; background: linear-gradient(135deg, #f97316 0%, #ea580c 100%); color: #ffffff; text-decoration: none; padding: 14px 35px; font-size: 16px; font-weight: bold; border-radius: 8px; box-shadow: 0 4px 10px rgba(249, 115, 22, 0.3);">
+                            RESUBMIT LICENSE
+                        </a>
+                    </div>
+                </div>
+                <div style="margin-top: 35px; padding-top: 20px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 12px; color: #94a3b8;">
                     <p style="margin: 0 0 5px 0;">&copy; ${new Date().getFullYear()} BusNet Project. All rights reserved.</p>
                     <p style="margin: 0;">This is an automated email. Please do not reply to this message.</p>
                 </div>
@@ -278,5 +414,8 @@ module.exports = {
     sendPasswordResetEmail,
     sendPartnerWelcomeEmail,
     sendBookingConfirmationEmail
+    sendPartnerPendingApprovalEmail,
+    sendLicenseApprovedEmail,
+    sendLicenseRejectedEmail
 };
 
