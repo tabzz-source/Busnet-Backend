@@ -4,7 +4,6 @@ const { validateRegisterOperator, validateContinueRegistration, validateComplete
 const authenticate = require('../../middlewares/auth.middleware');
 const { restrictTo } = require('../../middlewares/role.middleware');
 const { PARTNER } = require('../../constants/roles');
-const { validateRegisterOperator } = require('../../validations/auth.validation');
 
 const router = express.Router();
 
