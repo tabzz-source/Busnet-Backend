@@ -3,7 +3,7 @@ const express = require('express');
 const routeController = require('../../controllers/partner/partnerRoute.controller');
 const routeValidator = require('../../validations/route.validation');
 const auth = require('../../middlewares/auth.middleware');
-const role = require('../../middlewares/role.middleware')
+const role = require('../../middlewares/role.middleware');
 const router = express.Router();
 
 router.get('/', auth.authenticate, role.restrictTo('PARTNER'), routeController.getMyRoutes)

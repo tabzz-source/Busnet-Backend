@@ -5,6 +5,7 @@ const profileRoutes = require('./profile.routes');
 const forgotPasswordRoutes = require('./forgotPassword.routes');
 const scheduleRoutes = require('./schedule.routes');
 const dashboardRoutes = require('./dashboard.routes');
+const routeRoutes = require('./route.routes');
 
 const router = express.Router();
 
@@ -14,5 +15,6 @@ router.use('/profile', profileRoutes);
 router.use('/forgot-password', forgotPasswordRoutes);
 router.use('/schedules', scheduleRoutes);
 router.use('/dashboard', dashboardRoutes);
+router.use('/routes', routeRoutes);
 
 module.exports = router;
