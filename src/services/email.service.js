@@ -424,6 +424,58 @@ const sendLicenseRejectedEmail = async (email, operatorName, rejectionReason) =>
     return transporter.sendMail(mailOptions);
 };
 
+// New email functions for blog approval/rejection
+/**
+ * Send Email to Partner when their blog is approved and published.
+ * @param {string} email - Partner email address
+ * @param {string} blogTitle - Title of the approved blog
+ */
+const sendBlogApprovedEmail = async (email, blogTitle) => {
+    const mailOptions = {
+        from: process.env.EMAIL_FROM || "BusNet <no-reply@busnet.com>",
+        to: email,
+        subject: `[BusNet] Your blog "${blogTitle}" has been approved!`,
+        html: `
+            <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
+                <h2 style="color: #064e3b; margin: 0 0 15px; font-size: 24px;">Blog Approved 🎉</h2>
+                <p>Hello,</p>
+                <p>Your blog post <strong>${blogTitle}</strong> has been reviewed and approved by the admin team. It is now live on the platform.</p>
+                <p>Thank you for contributing to BusNet!</p>
+                <hr style="margin: 20px 0; border: none; border-top: 1px solid #e2e8f0;"/>
+                <p style="font-size: 12px; color: #64748b;">This is an automated email, please do not reply.</p>
+            </div>
+        `
+    };
+    return transporter.sendMail(mailOptions);
+};
+
+/**
+ * Send Email to Partner when their blog is rejected.
+ * @param {string} email - Partner email address
+ * @param {string} blogTitle - Title of the rejected blog
+ * @param {string} reason - Reason for rejection
+ */
+const sendBlogRejectedEmail = async (email, blogTitle, reason) => {
+    const mailOptions = {
+        from: process.env.EMAIL_FROM || "BusNet <no-reply@busnet.com>",
+        to: email,
+        subject: `[BusNet] Your blog "${blogTitle}" was rejected`,
+        html: `
+            <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #fff7f7;">
+                <h2 style="color: #7f1d1d; margin: 0 0 15px; font-size: 24px;">Blog Rejected ❌</h2>
+                <p>Hello,</p>
+                <p>Unfortunately, your blog post <strong>${blogTitle}</strong> did not meet our publishing guidelines.</p>
+                <p><strong>Reason:</strong> ${reason || 'Not provided'}</p>
+                <p>Please edit your post and resubmit for review.</p>
+                <hr style="margin: 20px 0; border: none; border-top: 1px solid #e2e8f0;"/>
+                <p style="font-size: 12px; color: #64748b;">This is an automated email, please do not reply.</p>
+            </div>
+        `
+    };
+    return transporter.sendMail(mailOptions);
+};
+
+
 module.exports = {
     sendVerificationEmail,
     sendPasswordResetEmail,
@@ -431,6 +483,8 @@ module.exports = {
     sendBookingConfirmationEmail,
     sendPartnerPendingApprovalEmail,
     sendLicenseApprovedEmail,
-    sendLicenseRejectedEmail
+    sendLicenseRejectedEmail,
+    sendBlogApprovedEmail,
+    sendBlogRejectedEmail
 };
 

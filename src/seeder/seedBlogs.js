@@ -26,7 +26,7 @@ const MOCK_POSTS = [
   <li>Visual BusNet booking system helps you select the exact preferred berth, pay quickly, and check real-time routes.</li>
   <li>Professional, highly experienced drivers ensuring absolute safety throughout the thousands-of-kilometers journey.</li>
 </ul>`,
-    tag: 'Featured News',
+    tag: 'Transit News',
     coverImage: '/images/blog_hero.png',
     status: 'PUBLISHED',
     views: 124,
@@ -98,7 +98,7 @@ const MOCK_POSTS = [
   <li><strong>Electronic tickets (E-tickets) via QR codes:</strong> Simpler check-in procedures, environment friendly, and faster dispatching.</li>
   <li><strong>Electric coaches:</strong> Environmentally friendly electric coaches being gradually tested on fixed routes.</li>
 </ul>`,
-    tag: 'News',
+    tag: 'Transit News',
     coverImage: '/images/blog_sunset.png',
     status: 'PUBLISHED',
     views: 110,
@@ -121,7 +121,7 @@ const MOCK_POSTS = [
   <li><strong>Step 3:</strong> Select your preferred berth on the visual layout. Available and booked seats are clearly color-coded.</li>
   <li><strong>Step 4:</strong> Enter passenger details accurately and pay via E-wallets (Momo, ZaloPay), local cards, or QR transfer. A QR code E-ticket will be sent immediately to your phone.</li>
 </ul>`,
-    tag: 'Features',
+    tag: 'General',
     coverImage: '/images/blog_phone.png',
     status: 'PUBLISHED',
     views: 231,
