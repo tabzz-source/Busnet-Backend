@@ -436,7 +436,8 @@ const getPartnerPaymentInfo = async (partnerId) => {
 
   const bankCode =
     partnerInfo.sepayBankCode ||
-    partnerInfo.bankCode;
+    partnerInfo.bankCode ||
+    partnerInfo.bankName;
 
   const accountNumber =
     partnerInfo.sepayAccountNumber ||

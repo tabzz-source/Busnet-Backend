@@ -869,13 +869,12 @@ const completeOperatorPayment = async (data) => {
     }
 
     // 4. Update PartnerInformation with bank/SePay details
-    const encryptedSepayKey = sepayCrypto.encrypt(sepayKey);
     partnerInfo.bankName = bankName;
     partnerInfo.bankNumber = bankNumber;
     partnerInfo.bankAccountName = bankAccountName;
     partnerInfo.bankBranch = bankBranch || '';
     partnerInfo.sepayVa = sepayVa;
-    partnerInfo.sepayKeyEncrypted = encryptedSepayKey;
+    partnerInfo.sepayKeyEncrypted = sepayKey;
     await partnerInfo.save();
 
     // 5. Get plan and calculate amount
