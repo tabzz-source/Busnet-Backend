@@ -131,7 +131,8 @@ const updateMyProfile = async (accountId, data, file) => {
   const hasBodyUpdates =
     data.fullName !== undefined ||
     data.gender !== undefined ||
-    data.dob !== undefined;
+    data.dob !== undefined ||
+    data.phone !== undefined;
 
   if (!hasBodyUpdates && !file) {
     throw new AppError("No profile data provided for update", 400);
@@ -139,6 +140,10 @@ const updateMyProfile = async (accountId, data, file) => {
 
   if (data.fullName !== undefined) {
     account.fullName = data.fullName.trim();
+  }
+
+  if (data.phone !== undefined) {
+    account.phone = data.phone.trim();
   }
 
   if (data.gender !== undefined) {

@@ -844,7 +844,11 @@ const getMyBookings = async (customerId, query = {}) => {
       .populate({
         path: "tripId",
         select:
-          "tripCode departureDate actualDepartureTime actualArrivalTime status",
+          "tripCode departureDate actualDepartureTime actualArrivalTime status routeId",
+        populate: {
+          path: "routeId",
+          select: "routeName originProvince destinationProvince",
+        }
       })
       .populate({
         path: "partnerId",
