@@ -172,111 +172,113 @@ const handleWebhook = asyncHandler(async (req, res) => {
     `[SePay Webhook] Transaction ${transactionId} updated successfully to SUCCESS.`,
   );
 
-    console.log(`[SePay Webhook] Transaction ${transactionId} updated successfully to SUCCESS.`);
+  console.log(`[SePay Webhook] Transaction ${transactionId} updated successfully to SUCCESS.`);
 
-    // 7. Perform activation based on transaction type
-    if (transaction.transactionType === 'SUBSCRIPTION_PAYMENT') {
-        const accountId = transaction.partnerId;
-        let subscriptionId = transaction.subscriptionId;
+  // 7. Perform activation based on transaction type
+  if (transaction.transactionType === 'SUBSCRIPTION_PAYMENT') {
+    const accountId = transaction.partnerId;
+    let subscriptionId = transaction.subscriptionId;
 
-        if (!accountId) {
-            console.error(`[SePay Webhook] Transaction ${transactionId} has no partnerId.`);
-            return res.status(200).json({ success: false, message: 'Acknowledged: No partner linked to transaction' });
+    if (!accountId) {
+      console.error(`[SePay Webhook] Transaction ${transactionId} has no partnerId.`);
+      return res.status(200).json({ success: false, message: 'Acknowledged: No partner linked to transaction' });
+    }
+
+    // A. Activate Partner Account
+    const account = await Account.findById(accountId);
+    if (account) {
+      account.status = 'ACTIVE';
+      account.isEmailVerified = true;
+      await account.save();
+      console.log(`[SePay Webhook] Activated Account status to ACTIVE for ${account.email}`);
+    }
+
+    // B. Update PartnerInformation verification
+    const partnerInfo = await PartnerInformation.findOne({ accountId });
+    if (partnerInfo) {
+      partnerInfo.isVerified = true;
+      partnerInfo.verifiedAt = new Date();
+      partnerInfo.selectedPlanId = null; // Clear temporary field
+      await partnerInfo.save();
+    }
+
+    // C. Handle subscription (create new or renew existing)
+    if (!subscriptionId) {
+      // New registration: create PartnerSubscription
+      const planId = (transaction.metadata && transaction.metadata.planId) || (partnerInfo && partnerInfo.selectedPlanId);
+      const plan = await SubscriptionPlan.findById(planId);
+      const durationDays = plan ? (plan.durationDays || 30) : 30;
+
+      const subscription = await PartnerSubscription.create({
+        partnerId: accountId,
+        planId: planId,
+        subscriptionDate: new Date(),
+        expirationDate: new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000),
+        subscriptionStatus: 'ACTIVE'
+      });
+      subscriptionId = subscription._id;
+
+      // Update transaction with subscription ID
+      transaction.subscriptionId = subscriptionId;
+      transaction.metadata = {};
+      await transaction.save();
+
+      console.log(`[SePay Webhook] Created PartnerSubscription with status ACTIVE`);
+    } else {
+      // Existing subscription renewal
+      const subscription = await PartnerSubscription.findById(subscriptionId);
+      if (subscription) {
+        const plan = await SubscriptionPlan.findById(subscription.planId);
+        if (plan) {
+          const durationDays = plan.durationDays || 30;
+          subscription.subscriptionStatus = 'ACTIVE';
+          subscription.subscriptionDate = new Date();
+          subscription.expirationDate = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000);
+          await subscription.save();
+          console.log(`[SePay Webhook] Renewed Subscription plan ${plan.planName}, expiration: ${subscription.expirationDate.toISOString()}`);
         }
-
-        // A. Activate Partner Account
-        const account = await Account.findById(accountId);
-        if (account) {
-            account.status = 'ACTIVE';
-            account.isEmailVerified = true;
-            await account.save();
-            console.log(`[SePay Webhook] Activated Account status to ACTIVE for ${account.email}`);
-        }
-
-        // B. Update PartnerInformation verification
-        const partnerInfo = await PartnerInformation.findOne({ accountId });
-        if (partnerInfo) {
-            partnerInfo.isVerified = true;
-            partnerInfo.verifiedAt = new Date();
-            partnerInfo.selectedPlanId = null; // Clear temporary field
-            await partnerInfo.save();
-        }
-
-        // C. Handle subscription (create new or renew existing)
-        if (!subscriptionId) {
-            // New registration: create PartnerSubscription
-            const planId = (transaction.metadata && transaction.metadata.planId) || (partnerInfo && partnerInfo.selectedPlanId);
-            const plan = await SubscriptionPlan.findById(planId);
-            const durationDays = plan ? (plan.durationDays || 30) : 30;
-
-            const subscription = await PartnerSubscription.create({
-                partnerId: accountId,
-                planId: planId,
-                subscriptionDate: new Date(),
-                expirationDate: new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000),
-                subscriptionStatus: 'ACTIVE'
-            });
-            subscriptionId = subscription._id;
-
-            // Update transaction with subscription ID
-            transaction.subscriptionId = subscriptionId;
-            transaction.metadata = {};
-            await transaction.save();
-
-            console.log(`[SePay Webhook] Created PartnerSubscription with status ACTIVE`);
-        } else {
-            // Existing subscription renewal
-            const subscription = await PartnerSubscription.findById(subscriptionId);
-            if (subscription) {
-                const plan = await SubscriptionPlan.findById(subscription.planId);
-                if (plan) {
-                    const durationDays = plan.durationDays || 30;
-                    subscription.subscriptionStatus = 'ACTIVE';
-                    subscription.subscriptionDate = new Date();
-                    subscription.expirationDate = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000);
-                    await subscription.save();
-                    console.log(`[SePay Webhook] Renewed Subscription plan ${plan.planName}, expiration: ${subscription.expirationDate.toISOString()}`);
-                }
-            }
-        }
-
-        // D. Send Partner Welcome Email
-        if (account && partnerInfo) {
-            const partnerLoginUrl = process.env.PARTNER_DASHBOARD_LOGIN_URL || 'http://localhost:5173/login';
-            emailService.sendPartnerWelcomeEmail(account.email, partnerInfo.operatorName, partnerLoginUrl)
-                .then(() => console.log(`[SePay Webhook] Welcome email sent successfully to ${account.email}`))
-                .catch((err) => console.error(`[SePay Webhook] Error sending welcome email:`, err));
-        }
-      }
-
-      // C. Send Partner Welcome Email with Dashboard link
-      const partnerInfo = await PartnerInformation.findOne({ accountId });
-      if (account && partnerInfo) {
-        const partnerLoginUrl =
-          process.env.PARTNER_DASHBOARD_LOGIN_URL ||
-          "http://localhost:5173/login";
-        emailService
-          .sendPartnerWelcomeEmail(
-            account.email,
-            partnerInfo.operatorName,
-            partnerLoginUrl,
-          )
-          .then(() =>
-            console.log(
-              `[SePay Webhook] Welcome email sent successfully to ${account.email}`,
-            ),
-          )
-          .catch((err) =>
-            console.error(`[SePay Webhook] Error sending welcome email:`, err),
-          );
       }
     }
+
+    // D. Send Partner Welcome Email
+    if (account && partnerInfo) {
+      const partnerLoginUrl = process.env.PARTNER_DASHBOARD_LOGIN_URL || 'http://localhost:5173/login';
+      emailService.sendPartnerWelcomeEmail(account.email, partnerInfo.operatorName, partnerLoginUrl)
+        .then(() => console.log(`[SePay Webhook] Welcome email sent successfully to ${account.email}`))
+        .catch((err) => console.error(`[SePay Webhook] Error sending welcome email:`, err));
+    }
+  }
+
+  // C. Send Partner Welcome Email with Dashboard link
+  const partnerInfo = await PartnerInformation.findOne({ accountId });
+  if (account && partnerInfo) {
+    const partnerLoginUrl =
+      process.env.PARTNER_DASHBOARD_LOGIN_URL ||
+      "http://localhost:5173/login";
+    emailService
+      .sendPartnerWelcomeEmail(
+        account.email,
+        partnerInfo.operatorName,
+        partnerLoginUrl,
+      )
+      .then(() =>
+        console.log(
+          `[SePay Webhook] Welcome email sent successfully to ${account.email}`,
+        ),
+      )
+      .catch((err) =>
+        console.error(`[SePay Webhook] Error sending welcome email:`, err),
+      );
   }
 
   return successResponse(res, 200, "Payment webhook processed successfully.", {
     transactionId: transaction._id,
   });
 });
+
+
+
+
 
 /**
  * GET /api/partner/subscription/status/:transactionId
@@ -301,6 +303,7 @@ const getTransactionStatus = asyncHandler(async (req, res) => {
     },
   );
 });
+
 const getAuthenticatedSepayPartner = (req) => {
   return req.partner || req.partnerInfo || req.sepayPartner || null;
 };

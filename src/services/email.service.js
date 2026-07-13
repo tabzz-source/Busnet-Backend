@@ -199,7 +199,8 @@ const sendBookingConfirmationEmail = async (params = {}) => {
     const safeDeparture = departureTime !== null && departureTime !== undefined
         ? `${formatDateTime(departureDate)}${departureTime !== null ? ` (${departureTime})` : ''}`
         : formatDateTime(departureDate);
- * Send Pending Approval Email to Partner after successful payment
+}       
+/* * Send Pending Approval Email to Partner after successful payment
  * @param {string} email - Destination email
  * @param {string} operatorName - Partner operator name
  */
@@ -317,8 +318,7 @@ const sendLicenseApprovedEmail = async (email, operatorName) => {
 
                 <div style="margin-top: 28px; padding-top: 18px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 12px; color: #94a3b8;">
         subject: '[BusNet] Business License Approved - Complete Your Registration',
-        html: `
-            <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);">
+         <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);">
                 <div style="text-align: center; border-bottom: 2px solid #10b981; padding-bottom: 20px; margin-bottom: 25px;">
                     <h1 style="color: #064e3b; margin: 0; font-size: 28px; letter-spacing: 1px; font-weight: 800;">BusNet</h1>
                     <p style="color: #047857; margin: 5px 0 0 0; font-size: 14px; font-weight: 500;">Smart Bus Operator Platform</p>
@@ -413,7 +413,7 @@ module.exports = {
     sendVerificationEmail,
     sendPasswordResetEmail,
     sendPartnerWelcomeEmail,
-    sendBookingConfirmationEmail
+    sendBookingConfirmationEmail,
     sendPartnerPendingApprovalEmail,
     sendLicenseApprovedEmail,
     sendLicenseRejectedEmail
