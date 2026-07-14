@@ -7,6 +7,7 @@ const scheduleRoutes = require('./schedule.routes');
 const dashboardRoutes = require('./dashboard.routes');
 const routeRoutes = require('./route.routes');
 const blogRoutes = require('./blog.routes');
+const ticketRoutes = require('./ticket.routes');
 
 const router = express.Router();
 
@@ -18,5 +19,6 @@ router.use('/schedules', scheduleRoutes);
 router.use('/dashboard', dashboardRoutes);
 router.use('/routes', routeRoutes);
 router.use('/blogs', blogRoutes);
+router.use('/tickets', ticketRoutes);
 
 module.exports = router;
