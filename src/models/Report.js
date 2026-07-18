@@ -17,6 +17,23 @@ const reportSchema = new mongoose.Schema(
             index: true
         },
 
+        // The actual entity being reported (a specific trip/booking/operator/
+        // transaction), as opposed to reportType which is just a category.
+        // Both optional/nullable — SYSTEM and OTHER reports have no natural
+        // target, and older reports predate this field entirely.
+        targetModel: {
+            type: String,
+            enum: ['Trip', 'Booking', 'Account', 'Transaction'],
+            default: null
+        },
+
+        targetRefId: {
+            type: mongoose.Schema.Types.ObjectId,
+            refPath: 'targetModel',
+            default: null,
+            index: true
+        },
+
         description: {
             type: String,
             required: true,

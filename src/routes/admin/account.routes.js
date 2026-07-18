@@ -4,7 +4,7 @@ const { protect } = require('../../middlewares/auth.middleware');
 const { restrictTo } = require('../../middlewares/role.middleware');
 const validate = require('../../middlewares/validate.middleware');
 const { ADMIN } = require('../../constants/roles');
-const { param, body } = require('express-validator');
+const { param, body, query } = require('express-validator');
 
 const router = express.Router();
 
@@ -12,6 +12,19 @@ router.use(protect, restrictTo(ADMIN));
 
 const customerIdValidation = [
     param('id').isMongoId().withMessage('Invalid customer id')
+];
+
+const getCustomersValidation = [
+    query('status')
+        .optional()
+        .isIn(['UNVERIFIED', 'ACTIVE', 'DELETED', 'BANNED', 'PENDING_APPROVAL', 'DISABLED'])
+        .withMessage('Invalid status filter'),
+
+    query('search').optional().trim().isLength({ max: 100 }).withMessage('Search must be at most 100 characters'),
+
+    query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
+
+    query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100')
 ];
 
 const updateCustomerStatusValidation = [
@@ -35,7 +48,7 @@ const updateCustomerStatusValidation = [
         .isISO8601().withMessage('expiredAt must be a valid date')
 ];
 
-router.get('/', adminAccountController.getCustomers);
+router.get('/', getCustomersValidation, validate, adminAccountController.getCustomers);
 router.get('/:id', customerIdValidation, validate, adminAccountController.getCustomerDetail);
 router.patch('/:id/status', updateCustomerStatusValidation, validate, adminAccountController.updateCustomerStatus);
 router.delete('/:id', customerIdValidation, validate, adminAccountController.deleteCustomer);

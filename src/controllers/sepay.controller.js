@@ -197,33 +197,44 @@ const handleWebhook = asyncHandler(async (req, res) => {
       }
 
       // C. Handle subscription (create new or renew existing)
+      // Money was already received and the transaction is marked SUCCESS above
+      // either way — but a plan that was deactivated/deleted between checkout
+      // and payment confirmation should not silently activate a subscription
+      // against it. Flag it for manual review instead of proceeding blind.
       if (!subscriptionId) {
           // New registration: create PartnerSubscription
           const planId = (transaction.metadata && transaction.metadata.planId) || (partnerInfo && partnerInfo.selectedPlanId);
           const plan = await SubscriptionPlan.findById(planId);
-          const durationDays = plan ? (plan.durationDays || 30) : 30;
 
-          const subscription = await PartnerSubscription.create({
-              partnerId: accountId,
-              planId: planId,
-              subscriptionDate: new Date(),
-              expirationDate: new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000),
-              subscriptionStatus: 'ACTIVE'
-          });
-          subscriptionId = subscription._id;
+          if (!plan || plan.status !== 'ACTIVE') {
+              console.error(`[SePay Webhook] Transaction ${transactionId} paid for plan ${planId}, but that plan is ${plan ? plan.status : 'missing'} — NOT creating a subscription. Needs manual review.`);
+          } else {
+              const durationDays = plan.durationDays || 30;
 
-          // Update transaction with subscription ID
-          transaction.subscriptionId = subscriptionId;
-          transaction.metadata = {};
-          await transaction.save();
+              const subscription = await PartnerSubscription.create({
+                  partnerId: accountId,
+                  planId: planId,
+                  subscriptionDate: new Date(),
+                  expirationDate: new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000),
+                  subscriptionStatus: 'ACTIVE'
+              });
+              subscriptionId = subscription._id;
 
-          console.log(`[SePay Webhook] Created PartnerSubscription with status ACTIVE`);
+              // Update transaction with subscription ID
+              transaction.subscriptionId = subscriptionId;
+              transaction.metadata = {};
+              await transaction.save();
+
+              console.log(`[SePay Webhook] Created PartnerSubscription with status ACTIVE`);
+          }
       } else {
           // Existing subscription renewal
           const subscription = await PartnerSubscription.findById(subscriptionId);
           if (subscription) {
               const plan = await SubscriptionPlan.findById(subscription.planId);
-              if (plan) {
+              if (!plan || plan.status !== 'ACTIVE') {
+                  console.error(`[SePay Webhook] Transaction ${transactionId} renewal payment received, but plan ${subscription.planId} is ${plan ? plan.status : 'missing'} — NOT renewing. Needs manual review.`);
+              } else {
                   const durationDays = plan.durationDays || 30;
                   subscription.subscriptionStatus = 'ACTIVE';
                   subscription.subscriptionDate = new Date();

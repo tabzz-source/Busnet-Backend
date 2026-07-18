@@ -192,7 +192,7 @@ const buildBookingTicketsPdf = async (customerId, bookingCode) => {
     .populate({
       path: "tripId",
       select:
-        "tripCode departureDate actualDepartureTime actualArrivalTime routeId partnerId",
+        "tripCode departureDate actualDepartureTime actualArrivalTime arrivalDayOffset routeId partnerId",
       populate: {
         path: "routeId",
         select:
@@ -231,7 +231,8 @@ const buildBookingTicketsPdf = async (customerId, bookingCode) => {
     : "N/A";
 
   const departureTimeText = formatMinutesToClock(trip.actualDepartureTime) || "N/A";
-  const arrivalTimeText = formatMinutesToClock(trip.actualArrivalTime) || "N/A";
+  const arrivalDayOffset = trip.arrivalDayOffset || 0;
+  const arrivalTimeText = `${formatMinutesToClock(trip.actualArrivalTime) || "N/A"}${arrivalDayOffset ? ` (+${arrivalDayOffset} day${arrivalDayOffset > 1 ? "s" : ""})` : ""}`;
 
   const lines = [
     `Booking Code: ${booking.bookingCode}`,
@@ -844,7 +845,7 @@ const getMyBookings = async (customerId, query = {}) => {
       .populate({
         path: "tripId",
         select:
-          "tripCode departureDate actualDepartureTime actualArrivalTime status routeId",
+          "tripCode departureDate actualDepartureTime actualArrivalTime arrivalDayOffset status routeId",
         populate: {
           path: "routeId",
           select: "routeName originProvince destinationProvince",
@@ -883,7 +884,7 @@ const getBookingByCodeForCustomer = async (customerId, bookingCode) => {
     .populate({
       path: "tripId",
       select:
-        "tripCode departureDate actualDepartureTime actualArrivalTime status routeId scheduleId busId partnerId",
+        "tripCode departureDate actualDepartureTime actualArrivalTime arrivalDayOffset status routeId scheduleId busId partnerId",
       populate: [
         {
           path: "routeId",
