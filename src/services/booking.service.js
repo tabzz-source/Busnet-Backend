@@ -18,10 +18,39 @@ const {
 } = require("../utils/bookingCode");
 
 const HOLD_MINUTES = 10;
+const CUSTOMER_CANCEL_CUTOFF_HOURS = 3;
+const CUSTOMER_CANCEL_CUTOFF_MS = CUSTOMER_CANCEL_CUTOFF_HOURS * 60 * 60 * 1000;
 
 const generateHoldToken = () => crypto.randomBytes(16).toString("hex");
 
 const buildPaymentContent = (bookingCode) => bookingCode;
+
+const getTripDateTime = (departureDate, minutes, addNextDay = false) => {
+  const date = new Date(departureDate);
+  date.setHours(0, 0, 0, 0);
+  date.setMinutes(minutes);
+
+  if (addNextDay) {
+    date.setDate(date.getDate() + 1);
+  }
+
+  return date;
+};
+
+const getTripArrivalDateTime = (trip) => {
+  if (!trip || trip.actualArrivalTime === null || trip.actualArrivalTime === undefined) {
+    return null;
+  }
+
+  const depMinutes = Number(trip.actualDepartureTime || 0);
+  const arrMinutes = Number(trip.actualArrivalTime);
+
+  if (!Number.isFinite(arrMinutes)) {
+    return null;
+  }
+
+  return getTripDateTime(trip.departureDate, arrMinutes, arrMinutes < depMinutes);
+};
 
 const formatMinutesToClock = (minutes) => {
   const totalMinutes = Number(minutes);
@@ -95,6 +124,207 @@ const wrapPdfText = (value, maxLength = 92) => {
   return lines;
 };
 
+const qrGfMultiply = (x, y) => {
+  let result = 0;
+  while (y > 0) {
+    if (y & 1) result ^= x;
+    x <<= 1;
+    if (x & 0x100) x ^= 0x11d;
+    y >>= 1;
+  }
+  return result;
+};
+
+const qrReedSolomonDivisor = (degree) => {
+  let result = [1];
+  let root = 1;
+
+  for (let i = 0; i < degree; i += 1) {
+    const next = new Array(result.length + 1).fill(0);
+    for (let j = 0; j < result.length; j += 1) {
+      next[j] ^= qrGfMultiply(result[j], root);
+      next[j + 1] ^= result[j];
+    }
+    result = next;
+    root = qrGfMultiply(root, 2);
+  }
+
+  return result;
+};
+
+const qrReedSolomonRemainder = (data, degree) => {
+  const divisor = qrReedSolomonDivisor(degree);
+  const result = new Array(degree).fill(0);
+
+  for (const byte of data) {
+    const factor = byte ^ result.shift();
+    result.push(0);
+
+    for (let i = 0; i < degree; i += 1) {
+      result[i] ^= qrGfMultiply(divisor[i], factor);
+    }
+  }
+
+  return result;
+};
+
+const appendBits = (bits, value, length) => {
+  for (let i = length - 1; i >= 0; i -= 1) {
+    bits.push((value >>> i) & 1);
+  }
+};
+
+const buildQrMatrix = (value) => {
+  const version = 4;
+  const size = version * 4 + 17;
+  const dataCodewords = 80;
+  const eccCodewords = 20;
+  const bytes = Buffer.from(String(value || ""), "utf8").slice(0, 70);
+  const bits = [];
+
+  appendBits(bits, 0b0100, 4);
+  appendBits(bits, bytes.length, 8);
+  for (const byte of bytes) appendBits(bits, byte, 8);
+  appendBits(bits, 0, Math.min(4, dataCodewords * 8 - bits.length));
+  while (bits.length % 8 !== 0) bits.push(0);
+
+  const data = [];
+  for (let i = 0; i < bits.length; i += 8) {
+    data.push(bits.slice(i, i + 8).reduce((sum, bit) => (sum << 1) | bit, 0));
+  }
+  for (let pad = 0xec; data.length < dataCodewords; pad ^= 0xec ^ 0x11) {
+    data.push(pad);
+  }
+
+  const allCodewords = [...data, ...qrReedSolomonRemainder(data, eccCodewords)];
+  const matrix = Array.from({ length: size }, () => new Array(size).fill(null));
+  const reserved = Array.from({ length: size }, () => new Array(size).fill(false));
+
+  const setModule = (x, y, dark, reserve = true) => {
+    if (x < 0 || y < 0 || x >= size || y >= size) return;
+    matrix[y][x] = Boolean(dark);
+    if (reserve) reserved[y][x] = true;
+  };
+
+  const drawFinder = (x, y) => {
+    for (let dy = -1; dy <= 7; dy += 1) {
+      for (let dx = -1; dx <= 7; dx += 1) {
+        const xx = x + dx;
+        const yy = y + dy;
+        const dark =
+          dx >= 0 &&
+          dx <= 6 &&
+          dy >= 0 &&
+          dy <= 6 &&
+          (dx === 0 || dx === 6 || dy === 0 || dy === 6 || (dx >= 2 && dx <= 4 && dy >= 2 && dy <= 4));
+        setModule(xx, yy, dark);
+      }
+    }
+  };
+
+  drawFinder(0, 0);
+  drawFinder(size - 7, 0);
+  drawFinder(0, size - 7);
+
+  for (let i = 8; i < size - 8; i += 1) {
+    setModule(i, 6, i % 2 === 0);
+    setModule(6, i, i % 2 === 0);
+  }
+
+  const drawAlignment = (cx, cy) => {
+    for (let dy = -2; dy <= 2; dy += 1) {
+      for (let dx = -2; dx <= 2; dx += 1) {
+        setModule(cx + dx, cy + dy, Math.max(Math.abs(dx), Math.abs(dy)) !== 1);
+      }
+    }
+  };
+  drawAlignment(26, 26);
+
+  for (let i = 0; i < 9; i += 1) {
+    setModule(8, i, false);
+    setModule(i, 8, false);
+    setModule(size - 1 - i, 8, false);
+    setModule(8, size - 1 - i, false);
+  }
+  setModule(8, size - 8, true);
+
+  const dataBits = [];
+  for (const codeword of allCodewords) appendBits(dataBits, codeword, 8);
+
+  let bitIndex = 0;
+  let upward = true;
+  for (let right = size - 1; right >= 1; right -= 2) {
+    if (right === 6) right -= 1;
+    for (let vert = 0; vert < size; vert += 1) {
+      const y = upward ? size - 1 - vert : vert;
+      for (let dx = 0; dx < 2; dx += 1) {
+        const x = right - dx;
+        if (reserved[y][x]) continue;
+        const rawBit = bitIndex < dataBits.length ? dataBits[bitIndex] === 1 : false;
+        bitIndex += 1;
+        const mask = (x + y) % 2 === 0;
+        matrix[y][x] = rawBit !== mask;
+      }
+    }
+    upward = !upward;
+  }
+
+  const formatBits = "111011111000100";
+  const formatCoordsA = [
+    [0, 8], [1, 8], [2, 8], [3, 8], [4, 8], [5, 8], [7, 8], [8, 8],
+    [8, 7], [8, 5], [8, 4], [8, 3], [8, 2], [8, 1], [8, 0],
+  ];
+  const formatCoordsB = [
+    [8, size - 1], [8, size - 2], [8, size - 3], [8, size - 4], [8, size - 5], [8, size - 6], [8, size - 7],
+    [size - 8, 8], [size - 7, 8], [size - 6, 8], [size - 5, 8], [size - 4, 8], [size - 3, 8], [size - 2, 8], [size - 1, 8],
+  ];
+  formatCoordsA.forEach(([x, y], index) => setModule(x, y, formatBits[index] === "1"));
+  formatCoordsB.forEach(([x, y], index) => setModule(x, y, formatBits[index] === "1"));
+
+  return matrix.map((row) => row.map(Boolean));
+};
+
+const pdfColor = (hex) => {
+  const clean = hex.replace("#", "");
+  const r = parseInt(clean.slice(0, 2), 16) / 255;
+  const g = parseInt(clean.slice(2, 4), 16) / 255;
+  const b = parseInt(clean.slice(4, 6), 16) / 255;
+  return `${r.toFixed(3)} ${g.toFixed(3)} ${b.toFixed(3)}`;
+};
+
+const pdfText = (text, x, y, size = 10, color = "#0f172a") => [
+  "BT",
+  `${pdfColor(color)} rg`,
+  `/F1 ${size} Tf`,
+  `1 0 0 1 ${x} ${y} Tm`,
+  `(${escapePdfText(text)}) Tj`,
+  "ET",
+].join("\n");
+
+const pdfRect = (x, y, width, height, color = "#ffffff") =>
+  `${pdfColor(color)} rg\n${x} ${y} ${width} ${height} re f`;
+
+const pdfStrokeRect = (x, y, width, height, color = "#e2e8f0", lineWidth = 1) =>
+  `${pdfColor(color)} RG\n${lineWidth} w\n${x} ${y} ${width} ${height} re S`;
+
+const pdfQr = (value, x, y, size) => {
+  const matrix = buildQrMatrix(value);
+  const quietModules = 4;
+  const moduleSize = size / (matrix.length + quietModules * 2);
+  const commands = [pdfRect(x, y, size, size, "#ffffff")];
+
+  matrix.forEach((row, rowIndex) => {
+    row.forEach((dark, colIndex) => {
+      if (!dark) return;
+      const moduleX = x + (colIndex + quietModules) * moduleSize;
+      const moduleY = y + size - (rowIndex + quietModules + 1) * moduleSize;
+      commands.push(`${pdfColor("#111827")} rg\n${moduleX.toFixed(2)} ${moduleY.toFixed(2)} ${moduleSize.toFixed(2)} ${moduleSize.toFixed(2)} re f`);
+    });
+  });
+
+  return commands.join("\n");
+};
+
 const buildPdfBuffer = (pages) => {
   const header = "%PDF-1.4\n";
   const objects = [];
@@ -115,25 +345,29 @@ const buildPdfBuffer = (pages) => {
     });
 
     const page = pages[pageIndex];
-    const contentLines = [];
-    contentLines.push("BT");
-    contentLines.push("/F1 18 Tf");
-    contentLines.push("1 0 0 1 50 790 Tm");
-    contentLines.push(`(${escapePdfText(page.title)}) Tj`);
+    let contentStream = page.rawContent;
 
-    let y = 765;
-    const lineHeight = 14;
+    if (!contentStream) {
+      const contentLines = [];
+      contentLines.push("BT");
+      contentLines.push("/F1 18 Tf");
+      contentLines.push("1 0 0 1 50 790 Tm");
+      contentLines.push(`(${escapePdfText(page.title)}) Tj`);
 
-    for (const line of page.lines) {
-      contentLines.push("/F1 10 Tf");
-      contentLines.push(`1 0 0 1 50 ${y} Tm`);
-      contentLines.push(`(${escapePdfText(line)}) Tj`);
-      y -= lineHeight;
+      let y = 765;
+      const lineHeight = 14;
+
+      for (const line of page.lines) {
+        contentLines.push("/F1 10 Tf");
+        contentLines.push(`1 0 0 1 50 ${y} Tm`);
+        contentLines.push(`(${escapePdfText(line)}) Tj`);
+        y -= lineHeight;
+      }
+
+      contentLines.push("ET");
+      contentStream = contentLines.join("\n");
     }
 
-    contentLines.push("ET");
-
-    const contentStream = contentLines.join("\n");
     objects.push({
       id: contentObjectId,
       body: `<< /Length ${Buffer.byteLength(contentStream, "ascii")} >>\nstream\n${contentStream}\nendstream`,
@@ -232,55 +466,82 @@ const buildBookingTicketsPdf = async (customerId, bookingCode) => {
 
   const departureTimeText = formatMinutesToClock(trip.actualDepartureTime) || "N/A";
   const arrivalTimeText = formatMinutesToClock(trip.actualArrivalTime) || "N/A";
-
-  const lines = [
-    `Booking Code: ${booking.bookingCode}`,
-    `Status: ${booking.status}`,
-    `Payment Status: ${booking.payment_status}`,
-    `Passenger: ${booking.passengerName || "N/A"}`,
-    `Passenger Phone: ${booking.passengerPhone || "N/A"}`,
-    `Trip Code: ${trip.tripCode || "N/A"}`,
-    `Route: ${route.routeName || "N/A"}`,
-    `From: ${route.origin_provinceName || "N/A"}${route.origin_districtName ? `, ${route.origin_districtName}` : ""}`,
-    `To: ${route.destination_provinceName || "N/A"}${route.destination_districtName ? `, ${route.destination_districtName}` : ""}`,
-    `Departure Date: ${departureDateText}`,
-    `Departure Time: ${departureTimeText}`,
-    `Arrival Time: ${arrivalTimeText}`,
-    `Pickup: ${booking.pickupPoint_name || "N/A"} - ${booking.pickupPoint_address || "N/A"} (${booking.pickupPoint_time || "N/A"})`,
-    `Dropoff: ${booking.dropoffPoint_name || "N/A"} - ${booking.dropoffPoint_address || "N/A"} (${booking.dropoffPoint_time || "N/A"})`,
-    `Total: ${Number(booking.total || 0).toLocaleString("en-US")} VND`,
-    "Tickets:",
-  ];
-
-  tickets.forEach((ticket, index) => {
+  const routeName = route.routeName || "N/A";
+  const fromText = `${route.origin_provinceName || "N/A"}${route.origin_districtName ? `, ${route.origin_districtName}` : ""}`;
+  const toText = `${route.destination_provinceName || "N/A"}${route.destination_districtName ? `, ${route.destination_districtName}` : ""}`;
+  const totalText = `${Number(booking.total || 0).toLocaleString("en-US")} VND`;
+  const pages = tickets.map((ticket, index) => {
     const seat = seatMap.get(String(ticket.seatCode || "").toUpperCase()) || {};
-    lines.push(
-      `${index + 1}. Ticket: ${ticket.ticketCode} | Seat: ${ticket.seatCode} | Type: ${seat.seatType || "N/A"} | Status: ${ticket.status}`,
-    );
+    const qrPayload = [
+      "BUSNET_TICKET",
+      `ticket=${ticket.ticketCode}`,
+      `booking=${booking.bookingCode}`,
+      `trip=${trip.tripCode || "N/A"}`,
+      `seat=${ticket.seatCode}`,
+    ].join("|");
+    const content = [];
+
+    content.push(pdfRect(0, 0, 595, 842, "#f8fafc"));
+    content.push(pdfRect(0, 764, 595, 78, "#0f4c81"));
+    content.push(pdfText("BusNet", 42, 805, 26, "#ffffff"));
+    content.push(pdfText("OFFICIAL E-TICKET", 42, 785, 11, "#dbeafe"));
+    content.push(pdfText(`Page ${index + 1} of ${tickets.length}`, 480, 805, 10, "#dbeafe"));
+
+    content.push(pdfRect(36, 44, 523, 690, "#ffffff"));
+    content.push(pdfStrokeRect(36, 44, 523, 690, "#dbe3ef", 1.2));
+
+    content.push(pdfText(routeName, 58, 704, 20, "#0f172a"));
+    content.push(pdfText(`${fromText}  ->  ${toText}`, 58, 684, 11, "#475569"));
+    content.push(pdfText(`Ticket Code: ${ticket.ticketCode}`, 58, 650, 12, "#0f4c81"));
+    content.push(pdfText(`Booking Code: ${booking.bookingCode}`, 58, 632, 10, "#64748b"));
+    content.push(pdfText(`Trip Code: ${trip.tripCode || "N/A"}`, 58, 616, 10, "#64748b"));
+
+    content.push(pdfRect(58, 542, 214, 52, "#eff6ff"));
+    content.push(pdfRect(292, 542, 214, 52, "#ecfdf5"));
+    content.push(pdfText("DEPARTURE", 72, 574, 9, "#2563eb"));
+    content.push(pdfText(`${departureDateText} - ${departureTimeText}`, 72, 554, 14, "#0f172a"));
+    content.push(pdfText("ARRIVAL", 306, 574, 9, "#059669"));
+    content.push(pdfText(arrivalTimeText, 306, 554, 14, "#0f172a"));
+
+    content.push(pdfText("Passenger", 58, 505, 9, "#94a3b8"));
+    content.push(pdfText(booking.passengerName || "N/A", 58, 486, 13, "#0f172a"));
+    content.push(pdfText("Phone", 300, 505, 9, "#94a3b8"));
+    content.push(pdfText(booking.passengerPhone || "N/A", 300, 486, 13, "#0f172a"));
+
+    content.push(pdfText("Seat", 58, 454, 9, "#94a3b8"));
+    content.push(pdfText(`${ticket.seatCode || "N/A"}${seat.seatType ? ` - ${seat.seatType}` : ""}`, 58, 432, 22, "#0f4c81"));
+    content.push(pdfText("Ticket Status", 300, 454, 9, "#94a3b8"));
+    content.push(pdfText(ticket.status || "ACTIVE", 300, 435, 13, "#0f172a"));
+
+    content.push(pdfText("Pickup", 58, 392, 9, "#94a3b8"));
+    wrapPdfText(`${booking.pickupPoint_name || "N/A"} - ${booking.pickupPoint_address || "N/A"} (${booking.pickupPoint_time || "N/A"})`, 68)
+      .slice(0, 3)
+      .forEach((line, lineIndex) => content.push(pdfText(line, 58, 374 - lineIndex * 15, 10, "#334155")));
+
+    content.push(pdfText("Dropoff", 58, 318, 9, "#94a3b8"));
+    wrapPdfText(`${booking.dropoffPoint_name || "N/A"} - ${booking.dropoffPoint_address || "N/A"} (${booking.dropoffPoint_time || "N/A"})`, 68)
+      .slice(0, 3)
+      .forEach((line, lineIndex) => content.push(pdfText(line, 58, 300 - lineIndex * 15, 10, "#334155")));
+
+    content.push(pdfText("Total Paid", 58, 238, 9, "#94a3b8"));
+    content.push(pdfText(totalText, 58, 216, 18, "#0f172a"));
+
+    content.push(pdfRect(356, 210, 150, 150, "#ffffff"));
+    content.push(pdfStrokeRect(356, 210, 150, 150, "#cbd5e1", 1));
+    content.push(pdfQr(qrPayload, 368, 222, 126));
+    content.push(pdfText("Scan this QR at boarding", 363, 190, 10, "#475569"));
+
+    content.push(pdfRect(58, 96, 448, 54, "#f8fafc"));
+    content.push(pdfStrokeRect(58, 96, 448, 54, "#e2e8f0", 1));
+    content.push(pdfText("Important", 74, 130, 10, "#0f172a"));
+    content.push(pdfText("Please arrive at pickup point 15 minutes before departure and present this ticket.", 74, 112, 9, "#475569"));
+    content.push(pdfText("This ticket is valid only for the passenger, trip, and seat shown above.", 74, 100, 9, "#475569"));
+
+    return {
+      title: `BusNet E-Ticket - ${ticket.ticketCode}`,
+      rawContent: content.join("\n"),
+    };
   });
-
-  const wrappedLines = [];
-  lines.forEach((line) => {
-    const wrapped = wrapPdfText(line, 90);
-    wrappedLines.push(...wrapped);
-  });
-
-  const pageSize = 40;
-  const pages = [];
-
-  for (let index = 0; index < wrappedLines.length; index += pageSize) {
-    pages.push({
-      title: `BusNet Booking Tickets - ${booking.bookingCode}`,
-      lines: wrappedLines.slice(index, index + pageSize),
-    });
-  }
-
-  if (pages.length === 0) {
-    pages.push({
-      title: `BusNet Booking Tickets - ${booking.bookingCode}`,
-      lines: ["No ticket data available"],
-    });
-  }
 
   return {
     pdfBuffer: buildPdfBuffer(pages),
@@ -935,7 +1196,7 @@ const getBookingStatus = async (customerId, bookingCode) => {
     customerId,
   })
     .select(
-      "bookingCode status payment_status total payment_amount expiresAt confirmedAt cancelledAt createdAt updatedAt",
+      "bookingCode status payment_status total payment_amount expiresAt confirmedAt cancelRequestedAt cancelledAt createdAt updatedAt",
     )
     .lean();
 
@@ -951,6 +1212,7 @@ const getBookingStatus = async (customerId, bookingCode) => {
     payment_amount: booking.payment_amount,
     expiresAt: booking.expiresAt,
     confirmedAt: booking.confirmedAt,
+    cancelRequestedAt: booking.cancelRequestedAt,
     cancelledAt: booking.cancelledAt,
     createdAt: booking.createdAt,
     updatedAt: booking.updatedAt,
@@ -1405,7 +1667,10 @@ const expireStaleBookings = async () => {
       },
     );
 
+    booking.status = "CANCELLED_BY_CUSTOMER";
     booking.payment_status = "EXPIRED";
+    booking.cancelReason = "Payment expired";
+    booking.cancelledAt = new Date();
     await booking.save();
 
     results.push({
@@ -1417,6 +1682,75 @@ const expireStaleBookings = async () => {
 
   return {
     expiredCount: results.length,
+    results,
+  };
+};
+
+const completeArrivedBookings = async () => {
+  const now = new Date();
+  const todayEnd = new Date(now);
+  todayEnd.setHours(23, 59, 59, 999);
+
+  const trips = await Trip.find({
+    status: { $in: ["OPEN", "CLOSED", "DELAYED"] },
+    departureDate: { $lte: todayEnd },
+    actualArrivalTime: { $ne: null },
+  })
+    .select("_id tripCode departureDate actualDepartureTime actualArrivalTime status")
+    .limit(200)
+    .lean();
+
+  const results = [];
+
+  for (const trip of trips) {
+    const arrivalDateTime = getTripArrivalDateTime(trip);
+
+    if (!arrivalDateTime || arrivalDateTime > now) {
+      continue;
+    }
+
+    const [tripUpdateResult, bookingUpdateResult] = await Promise.all([
+      Trip.updateOne(
+        {
+          _id: trip._id,
+          status: { $in: ["OPEN", "CLOSED", "DELAYED"] },
+        },
+        {
+          $set: {
+            status: "COMPLETED",
+          },
+        },
+      ),
+      Booking.updateMany(
+        {
+          tripId: trip._id,
+          status: "CONFIRMED",
+          payment_status: "PAID",
+        },
+        {
+          $set: {
+            status: "COMPLETED",
+          },
+        },
+      ),
+    ]);
+
+    if (tripUpdateResult.modifiedCount > 0 || bookingUpdateResult.modifiedCount > 0) {
+      results.push({
+        tripId: trip._id,
+        tripCode: trip.tripCode,
+        arrivalDateTime,
+        completedBookings: bookingUpdateResult.modifiedCount,
+      });
+    }
+  }
+
+  return {
+    completedTripCount: results.length,
+    completedBookingCount: results.reduce(
+      (sum, item) => sum + item.completedBookings,
+      0,
+    ),
     results,
   };
 };
@@ -1441,8 +1775,8 @@ const cancelBooking = async (customerId, bookingCode, reason = "") => {
     throw new AppError("Booking has already been cancelled", 400);
   }
 
-  if (booking.status === "COMPLETED") {
-    throw new AppError("Completed booking cannot be cancelled", 400);
+  if (booking.status === "CANCEL_REQUESTED") {
+    throw new AppError("Cancellation request has already been submitted", 400);
   }
 
   if (
@@ -1479,10 +1813,70 @@ const cancelBooking = async (customerId, bookingCode, reason = "") => {
     };
   }
 
+  throw new AppError("Only pending unpaid bookings can be cancelled directly", 400);
+};
+
+const requestCancelBooking = async (customerId, bookingCode, reason = "") => {
+  const booking = await Booking.findOne({
+    bookingCode: String(bookingCode || "")
+      .trim()
+      .toUpperCase(),
+    customerId,
+  });
+
+  if (!booking) {
+    throw new AppError("Booking not found", 404);
+  }
+
+  if (
+    ["CANCELLED_BY_CUSTOMER", "CANCELLED_BY_OPERATOR", "REFUNDED"].includes(
+      booking.status,
+    )
+  ) {
+    throw new AppError("Booking has already been cancelled", 400);
+  }
+
+  if (booking.status === "CANCEL_REQUESTED") {
+    throw new AppError("Cancellation request has already been submitted", 400);
+  }
+
+  if (booking.status === "COMPLETED") {
+    throw new AppError("Completed booking cannot be cancelled", 400);
+  }
+
   if (booking.status === "CONFIRMED" && booking.payment_status === "PAID") {
+    const trip = await Trip.findById(booking.tripId).select(
+      "departureDate actualDepartureTime status",
+    );
+
+    if (!trip) {
+      throw new AppError("Trip not found for this booking", 404);
+    }
+
+    if (["CANCELLED", "COMPLETED"].includes(trip.status)) {
+      throw new AppError("Booking cannot be cancelled because the trip is no longer active", 400);
+    }
+
+    const departureAt = getTripDateTime(
+      trip.departureDate,
+      trip.actualDepartureTime,
+    );
+    const timeUntilDeparture = departureAt.getTime() - Date.now();
+
+    if (timeUntilDeparture <= 0) {
+      throw new AppError("Booking cannot be cancelled after departure time", 400);
+    }
+
+    if (timeUntilDeparture < CUSTOMER_CANCEL_CUTOFF_MS) {
+      throw new AppError(
+        `Booking can only be cancelled at least ${CUSTOMER_CANCEL_CUTOFF_HOURS} hours before departure`,
+        400,
+      );
+    }
+
     booking.status = "CANCEL_REQUESTED";
     booking.cancelReason = reason;
-    booking.cancelledAt = new Date();
+    booking.cancelRequestedAt = new Date();
 
     await booking.save();
 
@@ -1495,7 +1889,7 @@ const cancelBooking = async (customerId, bookingCode, reason = "") => {
     };
   }
 
-  throw new AppError("Booking cannot be cancelled in current status", 400);
+  throw new AppError("Only confirmed paid bookings can request cancellation", 400);
 };
 
 module.exports = {
@@ -1508,7 +1902,9 @@ module.exports = {
   getBookingTicketsPdf,
   releaseHeldSeatsForBooking,
   expireStaleBookings,
+  completeArrivedBookings,
   cancelBooking,
+  requestCancelBooking,
   cleanupFailedBooking,
   processSepayBookingPayment,
   createTicketsForPaidBooking,
