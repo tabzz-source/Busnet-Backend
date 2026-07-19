@@ -12,6 +12,8 @@ const { notFound, errorHandler } = require("./middlewares/errorMiddleware");
 const { sweepExpiredBans } = require("./services/banExpiry.service");
 
 connectDB();
+const expireBookingsJob = require("./jobs/expireBookings.job");
+const completeArrivedBookingsJob = require("./jobs/completeArrivedBookings.job");
 
 // No dedicated job runner in this codebase — a plain interval is enough for
 // a single lightweight sweep. Mongoose buffers the query until the initial
@@ -68,6 +70,46 @@ app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+const startBookingJobs = () => {
+  let isRunning = false;
+
+  const runBookingJobs = async () => {
+    if (isRunning) return;
+
+    isRunning = true;
+    try {
+      const [expiredResult, completedResult] = await Promise.all([
+        expireBookingsJob(),
+        completeArrivedBookingsJob(),
+      ]);
+
+      if (expiredResult.expiredCount > 0) {
+        console.log(`[Booking Jobs] Expired stale bookings: ${expiredResult.expiredCount}`);
+      }
+
+      if (completedResult.completedBookingCount > 0) {
+        console.log(
+          `[Booking Jobs] Completed arrived bookings: ${completedResult.completedBookingCount}`,
+        );
+      }
+    } catch (error) {
+      console.error("[Booking Jobs] Failed to process booking jobs:", error);
+    } finally {
+      isRunning = false;
+    }
+  };
+
+  runBookingJobs();
+  setInterval(runBookingJobs, 60 * 1000);
+};
+
+const startServer = async () => {
+  await connectDB();
+
+  app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+    startBookingJobs();
+  });
+};
+
+startServer();

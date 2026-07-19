@@ -75,7 +75,23 @@ const cancelBooking = asyncHandler(async (req, res) => {
 
     const data = await bookingService.cancelBooking(customerId, bookingCode, reason);
 
-    return successResponse(res, 200, 'Booking cancelled successfully', data);
+    return successResponse(res, 200, data.message || 'Booking cancelled successfully', data);
+});
+
+const requestCancelBooking = asyncHandler(async (req, res) => {
+    const customerId = req.user.id;
+    const { bookingCode } = req.params;
+    const { reason } = req.body;
+
+    const data = await bookingService.requestCancelBooking(customerId, bookingCode, reason);
+
+    return successResponse(res, 200, data.message || 'Cancellation request submitted successfully', data);
+});
+
+const retrieveBooking = asyncHandler(async (req, res) => {
+    const { email, bookingCode } = req.body;
+    const data = await bookingService.retrieveBookingPublic(email, bookingCode);
+    return successResponse(res, 200, 'Booking retrieved successfully', data);
 });
 
 module.exports = {
@@ -86,5 +102,7 @@ module.exports = {
     getBookingPayment,
     getBookingTicketsPdf,
     getBookingTickets,
-    cancelBooking
+    cancelBooking,
+    requestCancelBooking,
+    retrieveBooking
 };

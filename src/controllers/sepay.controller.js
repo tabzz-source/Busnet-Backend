@@ -192,7 +192,6 @@ const handleWebhook = asyncHandler(async (req, res) => {
       if (partnerInfo) {
           partnerInfo.isVerified = true;
           partnerInfo.verifiedAt = new Date();
-          partnerInfo.selectedPlanId = null; // Clear temporary field
           await partnerInfo.save();
       }
 
@@ -220,13 +219,13 @@ const handleWebhook = asyncHandler(async (req, res) => {
               });
               subscriptionId = subscription._id;
 
-              // Update transaction with subscription ID
-              transaction.subscriptionId = subscriptionId;
-              transaction.metadata = {};
-              await transaction.save();
-
-              console.log(`[SePay Webhook] Created PartnerSubscription with status ACTIVE`);
+          // Clear temporary field now that subscription is active
+          if (partnerInfo) {
+              partnerInfo.selectedPlanId = null;
+              await partnerInfo.save();
           }
+
+          console.log(`[SePay Webhook] Created PartnerSubscription with status ACTIVE`);
       } else {
           // Existing subscription renewal
           const subscription = await PartnerSubscription.findById(subscriptionId);
@@ -244,6 +243,7 @@ const handleWebhook = asyncHandler(async (req, res) => {
               }
           }
       }
+    }
 
       // D. Send Partner Welcome Email
       if (account && partnerInfo) {
@@ -254,10 +254,36 @@ const handleWebhook = asyncHandler(async (req, res) => {
       }
   }
 
+  // C. Send Partner Welcome Email with Dashboard link
+  const partnerInfo = await PartnerInformation.findOne({ accountId });
+  if (account && partnerInfo) {
+    const partnerLoginUrl =
+      process.env.PARTNER_DASHBOARD_LOGIN_URL ||
+      "http://localhost:5173/login";
+    emailService
+      .sendPartnerWelcomeEmail(
+        account.email,
+        partnerInfo.operatorName,
+        partnerLoginUrl,
+      )
+      .then(() =>
+        console.log(
+          `[SePay Webhook] Welcome email sent successfully to ${account.email}`,
+        ),
+      )
+      .catch((err) =>
+        console.error(`[SePay Webhook] Error sending welcome email:`, err),
+      );
+  }
+
   return successResponse(res, 200, "Payment webhook processed successfully.", {
     transactionId: transaction._id,
   });
 });
+
+
+
+
 
 /**
  * GET /api/partner/subscription/status/:transactionId
@@ -282,6 +308,7 @@ const getTransactionStatus = asyncHandler(async (req, res) => {
     },
   );
 });
+
 const getAuthenticatedSepayPartner = (req) => {
   return req.partner || req.partnerInfo || req.sepayPartner || null;
 };

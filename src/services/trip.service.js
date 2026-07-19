@@ -3,6 +3,7 @@ const Route = require('../models/Route');
 const Schedule = require('../models/Schedule');
 const PartnerInformation = require('../models/PartnerInformation');
 const Bus = require('../models/Bus');
+const Booking = require('../models/Booking');
 const AppError = require('../utils/AppError');
 
 /**
@@ -508,9 +509,126 @@ const getTripBookingOptions = async (tripId) => {
     };
 };
 
+const getPopularRoutes = async () => {
+    // 1. Get date 30 days ago
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    // 2. Aggregate Bookings to find most popular routes
+    const bookingAggregation = await Booking.aggregate([
+        {
+            $match: {
+                createdAt: { $gte: thirtyDaysAgo },
+                status: { $in: ['CONFIRMED', 'COMPLETED'] }
+            }
+        },
+        {
+            $lookup: {
+                from: 'trips',
+                localField: 'tripId',
+                foreignField: '_id',
+                as: 'trip'
+            }
+        },
+        { $unwind: '$trip' },
+        {
+            $group: {
+                _id: '$trip.routeId',
+                bookingCount: { $sum: 1 }
+            }
+        },
+        { $sort: { bookingCount: -1 } },
+        { $limit: 8 }
+    ]);
+
+    let popularRouteIds = bookingAggregation.map(item => item._id);
+
+    // 3. Fallback: If less than 5 popular routes, retrieve seeded routes marked isPopular: true
+    if (popularRouteIds.length < 5) {
+        const seededPopularRoutes = await Route.find({
+            isPopular: true,
+            isActive: true,
+            deletedAt: null
+        }).limit(8);
+        
+        const seededRouteIds = seededPopularRoutes.map(r => r._id);
+        
+        // Combine preserving uniqueness
+        const idSet = new Set(popularRouteIds.map(id => id.toString()));
+        for (const rId of seededRouteIds) {
+            if (!idSet.has(rId.toString())) {
+                popularRouteIds.push(rId);
+            }
+        }
+    }
+
+    // 4. Fetch the full Route documents for these IDs
+    const routes = await Route.find({
+        _id: { $in: popularRouteIds },
+        isActive: true,
+        deletedAt: null
+    });
+
+    // Fetch partner details for all routes to show operatorName
+    const partnerIds = routes.map(r => r.partnerId);
+    const partnerInfos = await PartnerInformation.find({ accountId: { $in: partnerIds } });
+    const partnerMap = {};
+    partnerInfos.forEach(p => {
+        partnerMap[p.accountId.toString()] = p.operatorName;
+    });
+
+    // 5. Calculate minimum ticket price among active schedules for each route
+    const formattedRoutes = await Promise.all(
+        routes.map(async (route) => {
+            const activeSchedules = await Schedule.find({
+                routeId: route._id,
+                isActive: true
+            });
+
+            let minPrice = 0;
+            if (activeSchedules.length > 0) {
+                minPrice = Math.min(...activeSchedules.map((s) => s.basePrice || 0));
+            } else {
+                // Baseline: standard price based on distance
+                minPrice = (route.distanceKm || 120) * 1000;
+            }
+
+            const operatorName = partnerMap[route.partnerId.toString()] || "BusNet Partner";
+
+            return {
+                _id: route._id,
+                routeName: route.routeName,
+                origin_provinceName: route.origin_provinceName,
+                destination_provinceName: route.destination_provinceName,
+                distanceKm: route.distanceKm,
+                estimatedDuration: route.estimatedDuration,
+                minPrice,
+                operatorName
+            };
+        })
+    );
+
+    // Preserve order of popularRouteIds
+    const routeMap = {};
+    formattedRoutes.forEach(r => {
+        routeMap[r._id.toString()] = r;
+    });
+
+    const sortedRoutes = [];
+    popularRouteIds.forEach(id => {
+        const idStr = id.toString();
+        if (routeMap[idStr]) {
+            sortedRoutes.push(routeMap[idStr]);
+        }
+    });
+
+    return sortedRoutes.slice(0, 8);
+};
+
 module.exports = {
     searchTrips,
     getLocations,
     getTripDetail,
-    getTripBookingOptions
+    getTripBookingOptions,
+    getPopularRoutes
 };

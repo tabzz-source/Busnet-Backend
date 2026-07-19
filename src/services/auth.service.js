@@ -538,6 +538,16 @@ const forgotPassword = async (email) => {
     // Store in CodeVerification
     // If the account is UNVERIFIED, we generate a REGISTER code so they can verify and activate
     const codeType = account.status === 'UNVERIFIED' ? 'REGISTER' : 'RESET_PASSWORD';
+    if (codeType === 'RESET_PASSWORD') {
+        await CodeVerification.deleteMany({
+            accountId: account._id,
+            target: email.toLowerCase(),
+            targetType: 'EMAIL',
+            type: 'RESET_PASSWORD',
+            used: false
+        });
+    }
+
     await CodeVerification.create({
         accountId: account._id,
         target: email.toLowerCase(),
@@ -574,13 +584,24 @@ const verifyResetCode = async (email, code) => {
         throw new AppError('Email and code are required', 400);
     }
 
+    const account = await Account.findOne({
+        email: email.toLowerCase(),
+        role: 'CUSTOMER',
+        deletedAt: null
+    });
+
+    if (!account) {
+        throw new AppError('Customer account not found', 404);
+    }
+
     const verification = await CodeVerification.findOne({
+        accountId: account._id,
         target: email.toLowerCase(),
         targetType: 'EMAIL',
         type: 'RESET_PASSWORD',
         used: false,
         expiredAt: { $gt: new Date() }
-    }).select('+codeHash');
+    }).sort({ createdAt: -1 }).select('+codeHash');
 
     if (!verification) {
         throw new AppError('Invalid or expired verification code', 400);
@@ -615,14 +636,25 @@ const resetPassword = async (email, code, newPassword) => {
         throw new AppError('Email, code, and new password are required', 400);
     }
 
+    const account = await Account.findOne({
+        email: email.toLowerCase(),
+        role: 'CUSTOMER',
+        deletedAt: null
+    });
+
+    if (!account) {
+        throw new AppError('Customer account not found', 404);
+    }
+
     // 1. Verify code
     const verification = await CodeVerification.findOne({
+        accountId: account._id,
         target: email.toLowerCase(),
         targetType: 'EMAIL',
         type: 'RESET_PASSWORD',
         used: false,
         expiredAt: { $gt: new Date() }
-    }).select('+codeHash');
+    }).sort({ createdAt: -1 }).select('+codeHash');
 
     if (!verification) {
         throw new AppError('Invalid or expired verification code', 400);
@@ -643,13 +675,13 @@ const resetPassword = async (email, code, newPassword) => {
     const passwordHash = await bcrypt.hash(newPassword, BCRYPT_SALT_ROUNDS);
 
     // 3. Update the account password
-    const account = await Account.findOneAndUpdate(
-        { email: email.toLowerCase(), deletedAt: null },
+    const updatedAccount = await Account.findOneAndUpdate(
+        { _id: account._id, role: 'CUSTOMER', deletedAt: null },
         { passwordHash },
         { returnDocument: 'after' }
     );
 
-    if (!account) {
+    if (!updatedAccount) {
         throw new AppError('Account not found', 404);
     }
 
