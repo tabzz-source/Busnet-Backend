@@ -9,8 +9,29 @@ const cors = require("cors");
 const connectDB = require("./config/db");
 const routes = require("./routes");
 const { notFound, errorHandler } = require("./middlewares/errorMiddleware");
+const { sweepExpiredBans } = require("./services/banExpiry.service");
+
+connectDB();
 const expireBookingsJob = require("./jobs/expireBookings.job");
 const completeArrivedBookingsJob = require("./jobs/completeArrivedBookings.job");
+
+// No dedicated job runner in this codebase — a plain interval is enough for
+// a single lightweight sweep. Mongoose buffers the query until the initial
+// connectDB() finishes, so this is safe to start immediately.
+const BAN_SWEEP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
+const runBanSweep = () => {
+  sweepExpiredBans()
+    .then(({ swept }) => {
+      if (swept > 0) {
+        console.log(`Ban sweep: reactivated ${swept} account(s) with expired temporary bans`);
+      }
+    })
+    .catch((err) => console.error("Ban sweep failed:", err.message));
+};
+
+runBanSweep();
+setInterval(runBanSweep, BAN_SWEEP_INTERVAL_MS);
 
 const app = express();
 

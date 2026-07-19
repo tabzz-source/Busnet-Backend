@@ -3,8 +3,8 @@ const asyncHandler = require('../../utils/asyncHandler');
 const { successResponse } = require('../../utils/response');
 
 const getPlans = asyncHandler(async (req, res) => {
-    const { status } = req.query;
-    const plans = await subscriptionService.getAllPlans({ status });
+    const { status, limit } = req.query;
+    const plans = await subscriptionService.getAllPlans({ status, limit });
 
     return successResponse(res, 200, 'Subscription plan list fetched successfully', { plans });
 });

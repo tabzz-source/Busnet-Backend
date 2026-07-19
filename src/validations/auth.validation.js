@@ -355,8 +355,23 @@ const resetPasswordValidation = [
 
 const verifyEmailValidation = [
     body('code')
-        .notEmpty()
-        .withMessage('Code is required')
+        .trim()
+        .notEmpty().withMessage('Code is required')
+        .isLength({ min: 6, max: 6 }).withMessage('Code must be exactly 6 characters')
+        .matches(/^\d{6}$/).withMessage('Code must contain only digits')
+];
+
+const verifyLoginCodeValidation = [
+    body('email')
+        .trim()
+        .notEmpty().withMessage('Email is required')
+        .isEmail().withMessage('Invalid email format')
+        .normalizeEmail(),
+    body('code')
+        .trim()
+        .notEmpty().withMessage('Code is required')
+        .isLength({ min: 6, max: 6 }).withMessage('Code must be exactly 6 characters')
+        .matches(/^\d{6}$/).withMessage('Code must contain only digits')
 ];
 
 module.exports = {
@@ -373,5 +388,6 @@ module.exports = {
     validateResubmitLicense,
     forgotPasswordValidation,
     resetPasswordValidation,
-    verifyEmailValidation
+    verifyEmailValidation,
+    verifyLoginCodeValidation
 };

@@ -23,7 +23,15 @@ const validateCreateReport = [
         .optional()
         .isString()
         .withMessage('Each report image must be a string')
-        .trim()
+        .trim(),
+
+    // Optional: the specific trip/booking/operator/transaction being reported,
+    // if the client has one at hand (e.g. reporting from a trip's detail screen).
+    // Not required — SYSTEM/OTHER reports and older clients have none.
+    body('targetId')
+        .optional({ checkFalsy: true })
+        .isMongoId()
+        .withMessage('targetId must be a valid id')
 ];
 
 const validateReportId = [

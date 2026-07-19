@@ -6,6 +6,23 @@ const login = async (req, res) => {
 
         return res.status(200).json({
             success: true,
+            message: result.requiresVerification ? result.message : 'Logged in successfully',
+            data: result
+        });
+    } catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+const verifyLoginCode = async (req, res) => {
+    try {
+        const result = await authService.verifyLoginCodeAdmin(req.body.email, req.body.code);
+
+        return res.status(200).json({
+            success: true,
             message: 'Logged in successfully',
             data: result
         });
@@ -30,7 +47,11 @@ const sendVerifyEmail = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            message: result.message
+            message: result.message,
+            data: {
+                expiresInSeconds: result.expiresInSeconds,
+                resendCooldownSeconds: result.resendCooldownSeconds
+            }
         });
     } catch (error) {
         return res.status(400).json({
@@ -90,6 +111,7 @@ const resetPassword = async (req, res) => {
 
 module.exports = {
     login,
+    verifyLoginCode,
     logout,
     sendVerifyEmail,
     verifyEmail,

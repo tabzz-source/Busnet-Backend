@@ -78,6 +78,19 @@ const accountSchema = new mongoose.Schema(
             default: false
         },
 
+        // Progressive lockout for repeated failed email-verification attempts
+        // (admin self-verify flow): each time the lock is triggered again,
+        // emailVerifyLockStrikes goes up and the lock duration doubles.
+        emailVerifyLockedUntil: {
+            type: Date,
+            default: null
+        },
+
+        emailVerifyLockStrikes: {
+            type: Number,
+            default: 0
+        },
+
         isPhoneVerified: {
             type: Boolean,
             default: false

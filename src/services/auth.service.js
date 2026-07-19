@@ -8,6 +8,7 @@ const { CODE_VERIFICATION_TYPE } = require('../constants/statuses');
 const AppError = require('../utils/AppError');
 const { verifyGoogleToken } = require('./googleAuth.service');
 const emailService = require('./email.service');
+const { resolveAccountStatus } = require('./banExpiry.service');
 
 const BCRYPT_SALT_ROUNDS = 10;
 
@@ -139,6 +140,10 @@ const loginCustomer = async ({ identifier, password }) => {
     }
 
     if (account.status === 'BANNED') {
+        account.status = await resolveAccountStatus(account._id, account.status);
+    }
+
+    if (account.status === 'BANNED') {
         throw new AppError('This account has been banned', 403);
     }
 
@@ -261,6 +266,10 @@ const loginGoogleCustomer = async (idToken) => {
     // Step 3: Validate account status
     if (account.status === 'DELETED') {
         throw new AppError('This account has been deleted', 403);
+    }
+
+    if (account.status === 'BANNED') {
+        account.status = await resolveAccountStatus(account._id, account.status);
     }
 
     if (account.status === 'BANNED') {
@@ -511,6 +520,10 @@ const forgotPassword = async (email) => {
         }
 
         throw new AppError('Account with this email does not exist', 404);
+    }
+
+    if (account.status === 'BANNED') {
+        account.status = await resolveAccountStatus(account._id, account.status);
     }
 
     if (account.status === 'BANNED' || account.status === 'DELETED') {
@@ -1117,10 +1130,27 @@ const loginAdmin = async ({ email, password }) => {
         throw new Error('This account has been disabled');
     }
 
+    if (admin.emailVerifyLockedUntil && admin.emailVerifyLockedUntil > new Date()) {
+        throw new Error(formatLockError(admin.emailVerifyLockedUntil));
+    }
+
     const isMatch = await bcrypt.compare(password, admin.passwordHash);
 
     if (!isMatch) {
         throw new Error('Incorrect account or password');
+    }
+
+    // Admin has hit the lockout at least once before and still hasn't verified
+    // their email: require a fresh email-code confirmation before restoring
+    // full access, instead of logging straight in. verifyLoginCodeAdmin()
+    // completes the login once the code is confirmed.
+    if (admin.emailVerifyLockStrikes > 0 && !admin.isEmailVerified) {
+        await sendAdminVerificationCode(admin);
+        return {
+            requiresVerification: true,
+            email: admin.email,
+            message: 'For your security, we sent a verification code to your email. Enter it to confirm your identity and finish logging in.'
+        };
     }
 
     admin.lastLoginAt = new Date();
@@ -1130,22 +1160,66 @@ const loginAdmin = async ({ email, password }) => {
 
     return {
         token,
-        admin: {
-            _id: admin._id,
-            username: admin.username,
-            email: admin.email,
-            fullName: admin.fullName,
-            role: admin.role,
-            status: admin.status,
-            avatar: admin.profilePicture,
-            lastLoginAt: admin.lastLoginAt
-        }
+        admin: buildAdminAuthPayload(admin)
     };
 };
 
 // ============================
 // ADMIN: VERIFY EMAIL
 // ============================
+
+const ADMIN_VERIFY_RESEND_COOLDOWN_SECONDS = 60;
+const ADMIN_VERIFY_LOCK_BASE_DAYS = 7;
+
+const formatLockError = (lockedUntil) => {
+    const daysLeft = Math.ceil((lockedUntil.getTime() - Date.now()) / (24 * 60 * 60 * 1000));
+    return `Account is temporarily locked due to repeated failed verification attempts. Try again in ${daysLeft} day(s) (until ${lockedUntil.toISOString()}).`;
+};
+
+const assertAdminNotLocked = (admin) => {
+    if (admin.emailVerifyLockedUntil && admin.emailVerifyLockedUntil > new Date()) {
+        throw new Error(formatLockError(admin.emailVerifyLockedUntil));
+    }
+};
+
+// Shared by the Settings "verify email" flow and the post-lockout login
+// confirmation flow — both just need a fresh code emailed to the admin.
+const sendAdminVerificationCode = async (admin) => {
+    const lastCode = await CodeVerification.findOne({
+        target: admin.email,
+        targetType: 'EMAIL',
+        type: CODE_VERIFICATION_TYPE.VERIFY_EMAIL
+    }).sort({ createdAt: -1 });
+
+    if (lastCode) {
+        const secondsSinceLastSend = (Date.now() - lastCode.createdAt.getTime()) / 1000;
+        if (secondsSinceLastSend < ADMIN_VERIFY_RESEND_COOLDOWN_SECONDS) {
+            const waitSeconds = Math.ceil(ADMIN_VERIFY_RESEND_COOLDOWN_SECONDS - secondsSinceLastSend);
+            throw new Error(`Please wait ${waitSeconds}s before requesting a new code`);
+        }
+    }
+
+    // Invalidate any still-valid earlier code so only the latest one can succeed.
+    await CodeVerification.deleteMany({
+        target: admin.email,
+        targetType: 'EMAIL',
+        type: CODE_VERIFICATION_TYPE.VERIFY_EMAIL
+    });
+
+    const code = generateVerificationCode();
+    const codeHash = await bcrypt.hash(code, BCRYPT_SALT_ROUNDS);
+
+    await CodeVerification.create({
+        accountId: admin._id,
+        target: admin.email,
+        targetType: 'EMAIL',
+        type: CODE_VERIFICATION_TYPE.VERIFY_EMAIL,
+        codeHash,
+        expiredAt: addMinutes(new Date(), 10)
+    });
+
+    await emailService.sendAdminVerificationEmail(admin.email, code);
+};
 
 const sendVerifyEmailAdmin = async (adminId) => {
     const admin = await Account.findOne({ _id: adminId, role: 'ADMIN' });
@@ -1158,33 +1232,38 @@ const sendVerifyEmailAdmin = async (adminId) => {
         throw new Error('Email has already been verified');
     }
 
-    const code = generateVerificationCode();
-    const codeHash = await bcrypt.hash(code, BCRYPT_SALT_ROUNDS);
+    assertAdminNotLocked(admin);
+    await sendAdminVerificationCode(admin);
 
-    await CodeVerification.create({
-        target: admin.email,
-        targetType: 'EMAIL',
-        type: CODE_VERIFICATION_TYPE.VERIFY_EMAIL,
-        codeHash,
-        expiredAt: addMinutes(new Date(), 10)
-    });
-
-    await emailService.sendVerificationEmail(admin.email, code);
-
-    return { message: 'Verification code has been sent to your email' };
+    return {
+        message: 'Verification code has been sent to your email',
+        expiresInSeconds: 600,
+        resendCooldownSeconds: ADMIN_VERIFY_RESEND_COOLDOWN_SECONDS
+    };
 };
 
-const verifyEmailAdmin = async (adminId, code) => {
-    const admin = await Account.findOne({ _id: adminId, role: 'ADMIN' });
+// Shared by verifyEmailAdmin (Settings flow) and verifyLoginCodeAdmin
+// (post-lockout login flow): on a wrong code, count the attempt and, once
+// attempts are exhausted, escalate the progressive lockout.
+const registerFailedAdminCodeAttempt = async (admin, record) => {
+    record.attemptCount += 1;
+    await record.save();
+    const remainingAttempts = record.maxAttempts - record.attemptCount;
 
-    if (!admin) {
-        throw new Error('Admin not found');
+    if (remainingAttempts <= 0) {
+        // Each time this triggers, the lock duration doubles from the
+        // previous one (7 days, 14, 28, 56, ...).
+        admin.emailVerifyLockStrikes += 1;
+        const lockDays = ADMIN_VERIFY_LOCK_BASE_DAYS * (2 ** (admin.emailVerifyLockStrikes - 1));
+        admin.emailVerifyLockedUntil = new Date(Date.now() + lockDays * 24 * 60 * 60 * 1000);
+        await admin.save();
+        throw new Error(formatLockError(admin.emailVerifyLockedUntil));
     }
 
-    if (admin.isEmailVerified) {
-        throw new Error('Email has already been verified');
-    }
+    throw new Error(`Invalid verification code. ${remainingAttempts} attempt(s) remaining`);
+};
 
+const findActiveAdminCode = async (admin) => {
     const record = await CodeVerification.findOne({
         target: admin.email,
         type: CODE_VERIFICATION_TYPE.VERIFY_EMAIL,
@@ -1200,22 +1279,90 @@ const verifyEmailAdmin = async (adminId, code) => {
         throw new Error('Too many attempts, please request a new code');
     }
 
+    return record;
+};
+
+const buildAdminAuthPayload = (admin) => ({
+    _id: admin._id,
+    username: admin.username,
+    email: admin.email,
+    fullName: admin.fullName,
+    role: admin.role,
+    status: admin.status,
+    avatar: admin.profilePicture,
+    lastLoginAt: admin.lastLoginAt
+});
+
+const verifyEmailAdmin = async (adminId, code) => {
+    const admin = await Account.findOne({ _id: adminId, role: 'ADMIN' });
+
+    if (!admin) {
+        throw new Error('Admin not found');
+    }
+
+    if (admin.isEmailVerified) {
+        throw new Error('Email has already been verified');
+    }
+
+    assertAdminNotLocked(admin);
+
+    const record = await findActiveAdminCode(admin);
     const isMatch = await bcrypt.compare(code, record.codeHash);
 
     if (!isMatch) {
-        record.attemptCount += 1;
-        await record.save();
-        throw new Error('Invalid verification code');
+        await registerFailedAdminCodeAttempt(admin, record);
     }
 
     record.used = true;
     record.usedAt = new Date();
     await record.save();
 
+    admin.emailVerifyLockStrikes = 0;
+    admin.emailVerifyLockedUntil = null;
+
     admin.isEmailVerified = true;
     await admin.save();
 
     return { message: 'Email verified successfully' };
+};
+
+// Completes the login that loginAdmin() deferred because the admin had a
+// prior lockout strike and still hadn't verified their email — confirming
+// this code both finishes login (issues a token) and verifies the email in
+// the same step, so there's no separate Settings trip needed afterward.
+const verifyLoginCodeAdmin = async (email, code) => {
+    const admin = await Account.findOne({ email: email.toLowerCase(), role: 'ADMIN' });
+
+    if (!admin) {
+        throw new Error('Admin not found');
+    }
+
+    if (admin.status !== 'ACTIVE') {
+        throw new Error('This account has been disabled');
+    }
+
+    assertAdminNotLocked(admin);
+
+    const record = await findActiveAdminCode(admin);
+    const isMatch = await bcrypt.compare(code, record.codeHash);
+
+    if (!isMatch) {
+        await registerFailedAdminCodeAttempt(admin, record);
+    }
+
+    record.used = true;
+    record.usedAt = new Date();
+    await record.save();
+
+    admin.emailVerifyLockStrikes = 0;
+    admin.emailVerifyLockedUntil = null;
+    admin.isEmailVerified = true;
+    admin.lastLoginAt = new Date();
+    await admin.save();
+
+    const token = generateToken({ accountId: admin._id, role: admin.role });
+
+    return { token, admin: buildAdminAuthPayload(admin) };
 };
 
 // ============================
@@ -1504,6 +1651,7 @@ module.exports = {
     loginAdmin,
     sendVerifyEmailAdmin,
     verifyEmailAdmin,
+    verifyLoginCodeAdmin,
     forgotPasswordAdmin,
     resetPasswordAdmin,
     forgotPasswordPartner,
