@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Bus = require('../models/Bus');
 const Route = require('../models/Route');
 const Schedule = require('../models/Schedule');
@@ -6,7 +7,10 @@ const Booking = require('../models/Booking');
 const Transaction = require('../models/Transaction');
 const Feedback = require('../models/Feedback');
 
+const toObjectId = (partnerId) => new mongoose.Types.ObjectId(partnerId);
+
 const getPartnerStats = async (partnerId) => {
+    const partnerObjectId = toObjectId(partnerId);
     const [
         totalBuses,
         totalRoutes,
@@ -24,11 +28,11 @@ const getPartnerStats = async (partnerId) => {
         Booking.countDocuments({ partnerId }),
         Booking.countDocuments({ partnerId, status: 'CONFIRMED' }),
         Transaction.aggregate([
-            { $match: { partnerId, status: 'SUCCESS', transactionType: 'BOOKING_PAYMENT' } },
+            { $match: { partnerId: partnerObjectId, status: 'SUCCESS', transactionType: 'BOOKING_PAYMENT' } },
             { $group: { _id: null, total: { $sum: '$amount' } } }
         ]),
         Feedback.aggregate([
-            { $match: { partnerId, status: 'VISIBLE' } },
+            { $match: { partnerId: partnerObjectId, status: 'VISIBLE' } },
             {
                 $group: {
                     _id: null,
@@ -57,23 +61,24 @@ const getPartnerStats = async (partnerId) => {
 };
 
 const getRevenueChart = async (partnerId, months = 6) => {
+    const partnerObjectId = toObjectId(partnerId);
     const now = new Date();
     const startDate = new Date(now.getFullYear(), now.getMonth() - months + 1, 1);
 
     const result = await Transaction.aggregate([
         {
             $match: {
-                partnerId,
+                partnerId: partnerObjectId,
                 status: 'SUCCESS',
                 transactionType: 'BOOKING_PAYMENT',
-                createdAt: { $gte: startDate }
+                transactionDate: { $gte: startDate }
             }
         },
         {
             $group: {
                 _id: {
-                    year: { $year: '$createdAt' },
-                    month: { $month: '$createdAt' }
+                    year: { $year: '$transactionDate' },
+                    month: { $month: '$transactionDate' }
                 },
                 revenue: { $sum: '$amount' },
                 count: { $sum: 1 }
@@ -100,8 +105,9 @@ const getRevenueChart = async (partnerId, months = 6) => {
 };
 
 const getBookingStatusBreakdown = async (partnerId) => {
+    const partnerObjectId = toObjectId(partnerId);
     const result = await Booking.aggregate([
-        { $match: { partnerId } },
+        { $match: { partnerId: partnerObjectId } },
         { $group: { _id: '$status', count: { $sum: 1 } } },
         { $sort: { count: -1 } }
     ]);
@@ -123,12 +129,22 @@ const getRecentBookings = async (partnerId, limit = 5) => {
 
 const getUpcomingTrips = async (partnerId, limit = 5) => {
     const now = new Date();
-    now.setHours(0, 0, 0, 0);
+    const startOfToday = new Date(now);
+    startOfToday.setHours(0, 0, 0, 0);
+    const startOfTomorrow = new Date(startOfToday);
+    startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
+    const currentMinute = now.getHours() * 60 + now.getMinutes();
 
     return Trip.find({
         partnerId,
-        departureDate: { $gte: now },
-        status: { $in: ['OPEN', 'DELAYED'] }
+        status: { $in: ['OPEN', 'DELAYED'] },
+        $or: [
+            { departureDate: { $gte: startOfTomorrow } },
+            {
+                departureDate: { $gte: startOfToday, $lt: startOfTomorrow },
+                actualDepartureTime: { $gte: currentMinute }
+            }
+        ]
     })
         .populate('routeId', 'routeName origin_provinceName destination_provinceName')
         .populate('busId', 'busName licensePlate busType')

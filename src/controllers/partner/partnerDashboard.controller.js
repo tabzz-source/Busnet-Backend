@@ -10,7 +10,7 @@ const getStats = asyncHandler(async (req, res) => {
 
 const getRevenueChart = asyncHandler(async (req, res) => {
     const partnerId = req.user.id;
-    const months = parseInt(req.query.months) || 6;
+    const months = Number(req.query.months ?? 6);
     const result = await partnerDashboardService.getRevenueChart(partnerId, months);
     return successResponse(res, 200, 'Revenue chart data fetched successfully', result);
 });
@@ -23,14 +23,14 @@ const getBookingStatusBreakdown = asyncHandler(async (req, res) => {
 
 const getRecentBookings = asyncHandler(async (req, res) => {
     const partnerId = req.user.id;
-    const limit = parseInt(req.query.limit) || 5;
+    const limit = Number(req.query.limit ?? 5);
     const result = await partnerDashboardService.getRecentBookings(partnerId, limit);
     return successResponse(res, 200, 'Recent bookings fetched successfully', result);
 });
 
 const getUpcomingTrips = asyncHandler(async (req, res) => {
     const partnerId = req.user.id;
-    const limit = parseInt(req.query.limit) || 5;
+    const limit = Number(req.query.limit ?? 5);
     const result = await partnerDashboardService.getUpcomingTrips(partnerId, limit);
     return successResponse(res, 200, 'Upcoming trips fetched successfully', result);
 });
