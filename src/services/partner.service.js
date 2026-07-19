@@ -2,6 +2,9 @@ const Account = require('../models/Account');
 const PartnerInformation = require('../models/PartnerInformation');
 const PartnerSubscription = require('../models/PartnerSubscription');
 const BanHistory = require('../models/BanHistory');
+const Route = require('../models/Route');
+const Bus = require('../models/Bus');
+const Schedule = require('../models/Schedule');
 const AppError = require('../utils/AppError');
 const uploadToCloudinary = require('../utils/uploadToCloudinary');
 const { PARTNER } = require('../constants/roles');
@@ -163,6 +166,17 @@ const deletePartner = async (partnerId) => {
     partner.status = 'DELETED';
     partner.deletedAt = new Date();
     await partner.save();
+
+    // Deleting the account alone left their Routes/Buses/Schedules fully
+    // active — trips kept generating and staying searchable/bookable for a
+    // partner that no longer has a live account. Deactivate them in lockstep,
+    // consistent with how the rest of the app already gates visibility on
+    // isActive rather than physically deleting these records.
+    await Promise.all([
+        Route.updateMany({ partnerId, isActive: true }, { isActive: false }),
+        Bus.updateMany({ partnerId, isActive: true }, { isActive: false }),
+        Schedule.updateMany({ partnerId, isActive: true }, { isActive: false })
+    ]);
 
     return { message: 'Partner deleted successfully' };
 };

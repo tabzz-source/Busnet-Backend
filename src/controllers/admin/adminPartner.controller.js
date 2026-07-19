@@ -44,6 +44,7 @@ const reviewPendingRegistration = asyncHandler(async (req, res) => {
     const result = await partnerService.reviewPendingRegistration(req.params.id, { status, rejectionReason }, req.user._id);
 
     const action = status === 'APPROVED' ? 'approved' : 'rejected';
+
     return successResponse(res, 200, `Registration ${action} successfully`, result);
 });
 

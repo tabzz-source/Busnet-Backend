@@ -11,6 +11,7 @@ const verifySepayBookingWebhook = async (req, res, next) => {
       contentType: req.headers["content-type"],
       userAgent: req.headers["user-agent"],
     });
+    console.log("[BOOKING AUTH][REQ BODY]", JSON.stringify(req.body, null, 2));
 
     // SePay gửi dạng:
     // Authorization: Apikey YOUR_API_KEY
@@ -46,25 +47,61 @@ const verifySepayBookingWebhook = async (req, res, next) => {
 
     const vaNumber = req.body.subAccount;
     const accNumber = req.body.accountNumber;
+    const bookingCode = req.body.code;
 
-    if (!vaNumber && !accNumber) {
-      return res.status(401).json({
-        success: false,
-        message: "Authentication Failed: Missing account identifiers (subAccount or accountNumber)",
-      });
-    }
-
-    const query = [];
+    // Step 1: Try finding partner by subAccount (VA) or accountNumber
+    let partnerInfo = null;
     if (vaNumber) {
-      query.push({ sepayVa: vaNumber });
+      partnerInfo = await PartnerInformation.findOne({ sepayVa: vaNumber }).select('+sepayKeyEncrypted').lean();
     }
-    if (accNumber) {
-      query.push({ bankNumber: accNumber });
+    if (!partnerInfo && accNumber) {
+      partnerInfo = await PartnerInformation.findOne({ bankNumber: accNumber }).select('+sepayKeyEncrypted').lean();
     }
 
-    const partnerInfo = await PartnerInformation.findOne({
-      $or: query,
-    }).lean();
+    // Step 2: Fallback - find partner via booking code (for SePay API Banking
+    // where accountNumber is SePay's VPBank intermediary, not the partner's bank)
+    if (!partnerInfo && bookingCode) {
+      const Booking = require("../models/Booking");
+      const { extractBookingCodeFromContent } = require("../utils/bookingCode");
+
+      let resolvedCode = String(bookingCode || "").trim().toUpperCase();
+      if (!resolvedCode || resolvedCode === "null") {
+        resolvedCode = extractBookingCodeFromContent(req.body.content) ||
+                       extractBookingCodeFromContent(req.body.description);
+      }
+
+      if (resolvedCode) {
+        const booking = await Booking.findOne({ bookingCode: resolvedCode }).lean();
+        if (booking && booking.partnerId) {
+          partnerInfo = await PartnerInformation.findOne({ accountId: booking.partnerId }).select('+sepayKeyEncrypted').lean();
+          console.log("[BOOKING AUTH][FALLBACK VIA BOOKING CODE]", {
+            bookingCode: resolvedCode,
+            foundPartner: !!partnerInfo,
+            partnerId: partnerInfo?.accountId ? String(partnerInfo.accountId) : null,
+          });
+        }
+      }
+    }
+
+    // Step 3: If still no partner, try extracting booking code from content/description
+    if (!partnerInfo && !bookingCode) {
+      const Booking = require("../models/Booking");
+      const { extractBookingCodeFromContent } = require("../utils/bookingCode");
+
+      const resolvedCode = extractBookingCodeFromContent(req.body.content) ||
+                           extractBookingCodeFromContent(req.body.description);
+
+      if (resolvedCode) {
+        const booking = await Booking.findOne({ bookingCode: resolvedCode }).lean();
+        if (booking && booking.partnerId) {
+          partnerInfo = await PartnerInformation.findOne({ accountId: booking.partnerId }).select('+sepayKeyEncrypted').lean();
+          console.log("[BOOKING AUTH][FALLBACK VIA CONTENT]", {
+            bookingCode: resolvedCode,
+            foundPartner: !!partnerInfo,
+          });
+        }
+      }
+    }
 
     console.log("[BOOKING AUTH][PARTNER INFO RESULT]", {
       found: !!partnerInfo,

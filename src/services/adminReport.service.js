@@ -1,5 +1,28 @@
 const Report = require('../models/Report');
+const Account = require('../models/Account');
 const AppError = require('../utils/AppError');
+const { sendReportResolvedEmail } = require('./email.service');
+
+// Display-friendly label per target model — whichever field an admin would
+// recognize the referenced record by at a glance.
+const TARGET_LABEL_FIELD = {
+    Trip: 'tripCode',
+    Booking: 'bookingCode',
+    Account: 'fullName',
+    Transaction: 'code'
+};
+
+const buildTargetSummary = (r) => {
+    if (!r.targetRefId || !r.targetModel) {
+        return null;
+    }
+    const labelField = TARGET_LABEL_FIELD[r.targetModel];
+    return {
+        model: r.targetModel,
+        id: r.targetRefId._id ? r.targetRefId._id.toString() : r.targetRefId.toString(),
+        label: (labelField && r.targetRefId[labelField]) || null
+    };
+};
 
 const getReports = async ({ status, targetType, page = 1, limit = 10 }) => {
     const filter = {};
@@ -16,21 +39,33 @@ const getReports = async ({ status, targetType, page = 1, limit = 10 }) => {
     const limitNum = Math.max(parseInt(limit, 10) || 10, 1);
     const skip = (pageNum - 1) * limitNum;
 
-    const [rawReports, total] = await Promise.all([
+    const [rawReports, total, statusCounts] = await Promise.all([
         Report.find(filter)
             .populate('accountId', '_id fullName email username phone profilePicture')
+            .populate('targetRefId')
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limitNum)
             .lean(),
-        Report.countDocuments(filter)
+        Report.countDocuments(filter),
+        // Stat cards summarize every report regardless of the current
+        // status/targetType filter or page — grouped once here instead of
+        // being derived from the paginated `reports` slice on the frontend.
+        Report.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }])
     ]);
+
+    const countByStatus = Object.fromEntries(statusCounts.map((s) => [s._id, s.count]));
+    const stats = {
+        pending: (countByStatus.PENDING || 0) + (countByStatus.IN_REVIEW || 0),
+        resolved: countByStatus.RESOLVED || 0,
+        dismissed: (countByStatus.DISMISSED || 0) + (countByStatus.REJECTED || 0)
+    };
 
     const reports = rawReports.map((r) => ({
         _id: r._id,
         reporterId: r.accountId,
         targetType: r.reportType,
-        targetId: r._id.toString(),
+        target: buildTargetSummary(r),
         reason: r.description,
         description: r.responseDescription || '',
         status: r.status,
@@ -48,7 +83,8 @@ const getReports = async ({ status, targetType, page = 1, limit = 10 }) => {
             page: pageNum,
             limit: limitNum,
             totalPages: Math.ceil(total / limitNum) || 1
-        }
+        },
+        stats
     };
 };
 
@@ -56,6 +92,7 @@ const getReportDetail = async (reportId) => {
     const r = await Report.findById(reportId)
         .populate('accountId', '_id fullName email username phone profilePicture')
         .populate('resolvedBy', '_id fullName email')
+        .populate('targetRefId')
         .lean();
 
     if (!r) {
@@ -66,7 +103,7 @@ const getReportDetail = async (reportId) => {
         _id: r._id,
         reporterId: r.accountId,
         targetType: r.reportType,
-        targetId: r._id.toString(),
+        target: buildTargetSummary(r),
         reason: r.description,
         description: r.responseDescription || '',
         status: r.status,
@@ -90,8 +127,8 @@ const resolveReport = async (reportId, { status, adminNote }, adminId) => {
         throw new AppError(`Report has already been ${report.status.toLowerCase()}`, 409);
     }
 
-    if (!['RESOLVED', 'DISMISSED', 'REJECTED'].includes(status)) {
-        throw new AppError('Status must be RESOLVED, DISMISSED, or REJECTED', 400);
+    if (!['RESOLVED', 'DISMISSED'].includes(status)) {
+        throw new AppError('Status must be RESOLVED or DISMISSED', 400);
     }
 
     report.status = status;
@@ -100,7 +137,20 @@ const resolveReport = async (reportId, { status, adminNote }, adminId) => {
     report.responseDescription = adminNote || '';
     report.resolvedBy = adminId;
     report.resolvedAt = new Date();
-    await report.save();
+    // validateModifiedOnly: some legacy reports predate fields that are now
+    // required (e.g. reportType/accountId) and don't have them set. A normal
+    // save() re-validates the whole document and would block this update on
+    // those untouched paths even though we're not changing them.
+    await report.save({ validateModifiedOnly: true });
+
+    if (status === 'RESOLVED' && report.accountId) {
+        const reporter = await Account.findById(report.accountId).select('email fullName').lean();
+        if (reporter?.email) {
+            sendReportResolvedEmail(reporter.email, reporter.fullName, report.description, adminNote).catch((err) => {
+                console.error('Failed to send report-resolved email:', err.message);
+            });
+        }
+    }
 
     return report;
 };

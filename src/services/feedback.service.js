@@ -42,6 +42,10 @@ const createFeedback = async (customerId, payload) => {
         type = 'TRIP'
     } = payload;
 
+    if (type !== 'TRIP') {
+        throw new AppError('Use operator feedback endpoint to review an operator', 400);
+    }
+
     const booking = await Booking.findById(bookingId).lean();
 
     if (!booking) {
@@ -52,11 +56,9 @@ const createFeedback = async (customerId, payload) => {
         throw new AppError('You are not allowed to review this booking', 403);
     }
 
-    const allowedBookingStatuses = ['CONFIRMED', 'COMPLETED'];
-
-    if (!allowedBookingStatuses.includes(booking.status)) {
+    if (booking.status !== 'COMPLETED') {
         throw new AppError(
-            'You can only review a confirmed or completed booking',
+            'You can only rate a completed trip',
             400
         );
     }
@@ -77,11 +79,57 @@ const createFeedback = async (customerId, payload) => {
         rating,
         review,
         reviewImages,
-        type,
+        type: 'TRIP',
         status: 'VISIBLE'
     });
 
     await recalculatePartnerRating(booking.partnerId);
+
+    return feedback;
+};
+
+const createOperatorFeedback = async (customerId, partnerId, payload) => {
+    const {
+        rating,
+        review = '',
+        reviewImages = []
+    } = payload;
+
+    const partnerInfo = await PartnerInformation.findOne({
+        accountId: partnerId,
+        isVerified: true
+    }).lean();
+
+    if (!partnerInfo) {
+        throw new AppError('Operator not found', 404);
+    }
+
+    if (String(customerId) === String(partnerId)) {
+        throw new AppError('You cannot review your own operator profile', 400);
+    }
+
+    const existedFeedback = await Feedback.findOne({
+        partnerId,
+        customerId,
+        type: 'OPERATOR'
+    }).lean();
+
+    if (existedFeedback) {
+        throw new AppError('You have already written feedback for this operator', 409);
+    }
+
+    const feedback = await Feedback.create({
+        bookingId: null,
+        customerId,
+        partnerId,
+        rating,
+        review,
+        reviewImages,
+        type: 'OPERATOR',
+        status: 'VISIBLE'
+    });
+
+    await recalculatePartnerRating(partnerId);
 
     return feedback;
 };
@@ -208,6 +256,7 @@ const getFeedbacksByPartner = async (partnerId, query = {}) => {
 
 module.exports = {
     createFeedback,
+    createOperatorFeedback,
     getMyFeedbacks,
     getFeedbacksByTrip,
     getFeedbacksByPartner

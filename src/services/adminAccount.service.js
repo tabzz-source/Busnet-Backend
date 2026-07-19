@@ -3,6 +3,7 @@ const Booking = require('../models/Booking');
 const BanHistory = require('../models/BanHistory');
 const AppError = require('../utils/AppError');
 const { CUSTOMER } = require('../constants/roles');
+const { resolveAccountStatus } = require('./banExpiry.service');
 
 const listSelect = '_id username email phone fullName status profilePicture isEmailVerified isPhoneVerified banCounts createdAt updatedAt';
 const detailSelect = `${listSelect} gender dob`;
@@ -25,10 +26,29 @@ const getCustomers = async ({ status, search, page = 1, limit = 10 }) => {
     const limitNum = Math.max(parseInt(limit, 10) || 10, 1);
     const skip = (pageNum - 1) * limitNum;
 
-    const [customers, total] = await Promise.all([
+    // Stat cards summarize the whole customer base, not just the current
+    // page/filter — counted separately from the paginated `filter` query.
+    const baseFilter = { role: CUSTOMER, deletedAt: null };
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+
+    const [customers, total, active, banned, newThisMonth] = await Promise.all([
         Account.find(filter).select(listSelect).sort({ createdAt: -1 }).skip(skip).limit(limitNum).lean(),
-        Account.countDocuments(filter)
+        Account.countDocuments(filter),
+        Account.countDocuments({ ...baseFilter, status: 'ACTIVE' }),
+        Account.countDocuments({ ...baseFilter, status: 'BANNED' }),
+        Account.countDocuments({ ...baseFilter, createdAt: { $gte: startOfMonth } })
     ]);
+
+    // Self-heal any TEMPORARY bans that have quietly expired since they were
+    // last looked at — bounded by limitNum (capped at 100), so this list
+    // endpoint never triggers more than that many extra lookups.
+    await Promise.all(customers.map(async (c) => {
+        if (c.status === 'BANNED') {
+            c.status = await resolveAccountStatus(c._id, c.status);
+        }
+    }));
 
     return {
         customers,
@@ -37,7 +57,8 @@ const getCustomers = async ({ status, search, page = 1, limit = 10 }) => {
             page: pageNum,
             limit: limitNum,
             totalPages: Math.ceil(total / limitNum) || 1
-        }
+        },
+        stats: { active, banned, newThisMonth }
     };
 };
 
@@ -48,6 +69,10 @@ const getCustomerDetail = async (customerId) => {
 
     if (!customer) {
         throw new AppError('Customer not found', 404);
+    }
+
+    if (customer.status === 'BANNED') {
+        customer.status = await resolveAccountStatus(customer._id, customer.status);
     }
 
     const [bookingStats, banHistory] = await Promise.all([

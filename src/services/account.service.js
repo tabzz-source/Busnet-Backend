@@ -143,7 +143,21 @@ const updateMyProfile = async (accountId, data, file) => {
   }
 
   if (data.phone !== undefined) {
-    account.phone = data.phone.trim();
+    const trimmedPhone = data.phone ? data.phone.trim() : null;
+    if (trimmedPhone && trimmedPhone !== account.phone) {
+      const existingPhoneAccount = await Account.findOne({
+        phone: trimmedPhone,
+        _id: { $ne: accountId },
+        deletedAt: null,
+      });
+
+      if (existingPhoneAccount) {
+        throw new AppError("Phone number is already in use by another account", 400);
+      }
+      account.phone = trimmedPhone;
+    } else if (!trimmedPhone) {
+      account.phone = null;
+    }
   }
 
   if (data.gender !== undefined) {
@@ -154,14 +168,6 @@ const updateMyProfile = async (accountId, data, file) => {
     account.dob = data.dob ? new Date(data.dob) : null;
   }
 
-//   if (file) {
-//     const uploadedProfileImage = await uploadToCloudinary(
-//       file.buffer,
-//       CUSTOMER_PROFILE_FOLDER,
-//     );
-//     account.profilePicture = uploadedProfileImage.secure_url;
-//   }
-
   if (file) {
     try {
       const uploadedProfileImage = await uploadToCloudinary(
@@ -169,7 +175,7 @@ const updateMyProfile = async (accountId, data, file) => {
         CUSTOMER_PROFILE_FOLDER,
       );
 
-      account.profilePicture = uploadedProfileImage.secure_url;
+      account.profilePicture = uploadedProfileImage.url;
     } catch (error) {
       console.log("Upload profile picture failed:", {
         message: error.message,
