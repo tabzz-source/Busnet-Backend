@@ -88,6 +88,12 @@ const requestCancelBooking = asyncHandler(async (req, res) => {
     return successResponse(res, 200, data.message || 'Cancellation request submitted successfully', data);
 });
 
+const retrieveBooking = asyncHandler(async (req, res) => {
+    const { email, bookingCode } = req.body;
+    const data = await bookingService.retrieveBookingPublic(email, bookingCode);
+    return successResponse(res, 200, 'Booking retrieved successfully', data);
+});
+
 module.exports = {
     createBooking,
     getMyBookings,
@@ -97,5 +103,6 @@ module.exports = {
     getBookingTicketsPdf,
     getBookingTickets,
     cancelBooking,
-    requestCancelBooking
+    requestCancelBooking,
+    retrieveBooking
 };

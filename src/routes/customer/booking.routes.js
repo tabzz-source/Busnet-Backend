@@ -5,6 +5,8 @@ const customerBookingController = require('../../controllers/customer/customerBo
 
 const router = express.Router();
 
+router.post('/retrieve', customerBookingController.retrieveBooking);
+
 router.post('/', authenticate, customerBookingController.createBooking);
 
 router.get('/', authenticate, customerBookingController.getMyBookings);
