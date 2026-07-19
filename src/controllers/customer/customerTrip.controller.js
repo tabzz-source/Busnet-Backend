@@ -63,9 +63,15 @@ const getTripBookingOptions = asyncHandler(async (req, res) => {
     return successResponse(res, 200, 'Trip booking options retrieved successfully', result);
 });
 
+const getPopularRoutes = asyncHandler(async (req, res) => {
+    const result = await tripService.getPopularRoutes();
+    return successResponse(res, 200, 'Popular routes retrieved successfully', result);
+});
+
 module.exports = {
     searchTrips,
     getLocations,
     getTripDetail,
-    getTripBookingOptions
+    getTripBookingOptions,
+    getPopularRoutes
 };

@@ -192,7 +192,6 @@ const handleWebhook = asyncHandler(async (req, res) => {
       if (partnerInfo) {
           partnerInfo.isVerified = true;
           partnerInfo.verifiedAt = new Date();
-          partnerInfo.selectedPlanId = null; // Clear temporary field
           await partnerInfo.save();
       }
 
@@ -216,6 +215,12 @@ const handleWebhook = asyncHandler(async (req, res) => {
           transaction.subscriptionId = subscriptionId;
           transaction.metadata = {};
           await transaction.save();
+
+          // Clear temporary field now that subscription is active
+          if (partnerInfo) {
+              partnerInfo.selectedPlanId = null;
+              await partnerInfo.save();
+          }
 
           console.log(`[SePay Webhook] Created PartnerSubscription with status ACTIVE`);
       } else {
