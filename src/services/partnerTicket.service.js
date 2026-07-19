@@ -1,5 +1,7 @@
 const mongoose = require('mongoose');
 const Ticket = require('../models/Ticket');
+const Trip = require('../models/Trip');
+const Bus = require('../models/Bus');
 const AppError = require('../utils/AppError');
 
 const TICKET_STATUSES = ['ISSUED', 'CANCELLED', 'EXPIRED', 'USED', 'NO_SHOW'];
@@ -51,6 +53,14 @@ const getPartnerTickets = async (partnerId, query = {}) => {
             throw new AppError('Invalid trip ID', 400);
         }
         ticketMatch.tripId = new mongoose.Types.ObjectId(query.tripId);
+    }
+
+    let busObjectId = null;
+    if (query.busId) {
+        if (!mongoose.isValidObjectId(query.busId)) {
+            throw new AppError('Invalid bus ID', 400);
+        }
+        busObjectId = new mongoose.Types.ObjectId(query.busId);
     }
 
     const departureFrom = parseDate(query.departureFrom, 'departureFrom');
@@ -105,6 +115,10 @@ const getPartnerTickets = async (partnerId, query = {}) => {
         },
         { $unwind: { path: '$bus', preserveNullAndEmptyArrays: true } }
     ];
+
+    if (busObjectId) {
+        pipeline.push({ $match: { 'trip.busId': busObjectId } });
+    }
 
     if (departureFrom || departureTo) {
         const departureDate = {};
@@ -183,11 +197,20 @@ const getPartnerTickets = async (partnerId, query = {}) => {
         }
     });
 
-    const [result] = await Ticket.aggregate(pipeline);
+    const [aggregationResult, busIds] = await Promise.all([
+        Ticket.aggregate(pipeline),
+        Trip.distinct('busId', { partnerId: partnerObjectId })
+    ]);
+    const [result] = aggregationResult;
+    const buses = await Bus.find({ _id: { $in: busIds } })
+        .select('busName licensePlate busType')
+        .sort({ busName: 1, licensePlate: 1 })
+        .lean();
     const total = result.metadata[0]?.total || 0;
 
     return {
         tickets: result.tickets,
+        filterOptions: { buses },
         pagination: {
             page,
             limit,

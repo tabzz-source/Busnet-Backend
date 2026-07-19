@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const Booking = require('../models/Booking');
 const BookingSeat = require('../models/BookingSeat');
 const Trip = require('../models/Trip');
+const Bus = require('../models/Bus');
 const Transaction = require('../models/Transaction');
 const Ticket = require('../models/Ticket');
 const PartnerInformation = require('../models/PartnerInformation');
@@ -152,6 +153,14 @@ const getPartnerBookings = async (partnerId, query = {}) => {
         bookingMatch.tripId = new mongoose.Types.ObjectId(query.tripId);
     }
 
+    let busObjectId = null;
+    if (query.busId) {
+        if (!mongoose.isValidObjectId(query.busId)) {
+            throw new AppError('Invalid bus ID', 400);
+        }
+        busObjectId = new mongoose.Types.ObjectId(query.busId);
+    }
+
     let departureFrom = parseDate(query.departureFrom, 'departureFrom');
     let departureTo = parseDate(query.departureTo, 'departureTo', true);
     if (query.departureDate) {
@@ -226,6 +235,10 @@ const getPartnerBookings = async (partnerId, query = {}) => {
         },
         { $unwind: { path: '$customer', preserveNullAndEmptyArrays: true } }
     ];
+
+    if (busObjectId) {
+        pipeline.push({ $match: { 'trip.busId': busObjectId } });
+    }
 
     if (departureFrom || departureTo) {
         const departureDate = {};
@@ -339,7 +352,15 @@ const getPartnerBookings = async (partnerId, query = {}) => {
         }
     });
 
-    const [result] = await Booking.aggregate(pipeline);
+    const [aggregationResult, busIds] = await Promise.all([
+        Booking.aggregate(pipeline),
+        Trip.distinct('busId', { partnerId: partnerObjectId })
+    ]);
+    const [result] = aggregationResult;
+    const buses = await Bus.find({ _id: { $in: busIds } })
+        .select('busName licensePlate busType')
+        .sort({ busName: 1, licensePlate: 1 })
+        .lean();
     const total = result.metadata[0]?.total || 0;
 
     const bookings = result.bookings.map((booking) => ({
@@ -367,6 +388,7 @@ const getPartnerBookings = async (partnerId, query = {}) => {
 
     return {
         bookings,
+        filterOptions: { buses },
         pagination: {
             page,
             limit,
