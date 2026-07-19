@@ -2042,68 +2042,6 @@ const requestCancelBooking = async (customerId, bookingCode, reason = "") => {
   throw new AppError("Only confirmed paid bookings can request cancellation", 400);
 };
 
-const retrieveBookingPublic = async (email, bookingCode) => {
-  const normalizedCode = String(bookingCode || "").trim().toUpperCase();
-  const normalizedEmail = String(email || "").trim().toLowerCase();
-
-  if (!normalizedCode || !normalizedEmail) {
-    throw new AppError("Email and booking code are required", 400);
-  }
-
-  const booking = await Booking.findOne({ bookingCode: normalizedCode })
-    .populate({
-      path: "tripId",
-      select:
-        "tripCode departureDate actualDepartureTime actualArrivalTime status routeId scheduleId busId partnerId",
-      populate: [
-        {
-          path: "routeId",
-          select:
-            "routeName originProvince originDistrict destinationProvince destinationDistrict distanceKm estimatedDuration origin_provinceName destination_provinceName origin_districtName destination_districtName",
-        },
-        {
-          path: "scheduleId",
-          select: "scheduleCode departureTime arrivalTime recurrenceType",
-        },
-        {
-          path: "busId",
-          select: "busName busType totalSeats licensePlate images",
-        },
-      ],
-    })
-    .populate({
-      path: "partnerId",
-      select: "fullName email phone profilePicture",
-    })
-    .populate({
-      path: "customerId",
-      select: "email fullName phone",
-    });
-
-  if (!booking) {
-    throw new AppError("Booking not found", 404);
-  }
-
-  const bPassengerEmail = String(booking.passengerEmail || "").trim().toLowerCase();
-  const bCustomerEmail = booking.customerId ? String(booking.customerId.email || "").trim().toLowerCase() : "";
-
-  if (bPassengerEmail !== normalizedEmail && bCustomerEmail !== normalizedEmail) {
-    throw new AppError("Email address does not match this booking code", 400);
-  }
-
-  const [seats, transaction] = await Promise.all([
-    BookingSeat.find({ bookingId: booking._id }).lean(),
-    Transaction.findOne({ bookingId: booking._id }).lean(),
-  ]);
-
-  return {
-    booking,
-    trip: formatTripForBooking(booking),
-    seats,
-    transaction,
-  };
-};
-
 module.exports = {
   createBooking,
   getMyBookings,
@@ -2121,5 +2059,4 @@ module.exports = {
   cleanupFailedBooking,
   processSepayBookingPayment,
   createTicketsForPaidBooking,
-  retrieveBookingPublic,
 };
