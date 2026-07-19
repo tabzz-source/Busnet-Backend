@@ -15,6 +15,8 @@ router.get('/:bookingCode/status', authenticate, customerBookingController.getBo
 
 router.get('/:bookingCode/payment', authenticate, customerBookingController.getBookingPayment);
 
+router.post('/:bookingCode/cancel-request', authenticate, customerBookingController.requestCancelBooking);
+
 router.post('/:bookingCode/cancel', authenticate, customerBookingController.cancelBooking);
 
 router.get('/:bookingCode/tickets/pdf', authenticate, customerBookingController.getBookingTicketsPdf);

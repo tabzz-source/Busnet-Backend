@@ -72,10 +72,10 @@ const sepayAuthMiddleware = async (req, res, next) => {
 
         let partner = null;
         if (vaNumber) {
-            partner = await PartnerInformation.findOne({ sepayVa: vaNumber });
+            partner = await PartnerInformation.findOne({ sepayVa: vaNumber }).select('+sepayKeyEncrypted');
         }
         if (!partner && accNumber) {
-            partner = await PartnerInformation.findOne({ bankNumber: accNumber });
+            partner = await PartnerInformation.findOne({ bankNumber: accNumber }).select('+sepayKeyEncrypted');
         }
         if (!partner) {
             return res.status(401).json({

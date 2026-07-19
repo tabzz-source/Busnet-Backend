@@ -52,10 +52,10 @@ const verifySepayBookingWebhook = async (req, res, next) => {
     // Step 1: Try finding partner by subAccount (VA) or accountNumber
     let partnerInfo = null;
     if (vaNumber) {
-      partnerInfo = await PartnerInformation.findOne({ sepayVa: vaNumber }).lean();
+      partnerInfo = await PartnerInformation.findOne({ sepayVa: vaNumber }).select('+sepayKeyEncrypted').lean();
     }
     if (!partnerInfo && accNumber) {
-      partnerInfo = await PartnerInformation.findOne({ bankNumber: accNumber }).lean();
+      partnerInfo = await PartnerInformation.findOne({ bankNumber: accNumber }).select('+sepayKeyEncrypted').lean();
     }
 
     // Step 2: Fallback - find partner via booking code (for SePay API Banking
@@ -73,7 +73,7 @@ const verifySepayBookingWebhook = async (req, res, next) => {
       if (resolvedCode) {
         const booking = await Booking.findOne({ bookingCode: resolvedCode }).lean();
         if (booking && booking.partnerId) {
-          partnerInfo = await PartnerInformation.findOne({ accountId: booking.partnerId }).lean();
+          partnerInfo = await PartnerInformation.findOne({ accountId: booking.partnerId }).select('+sepayKeyEncrypted').lean();
           console.log("[BOOKING AUTH][FALLBACK VIA BOOKING CODE]", {
             bookingCode: resolvedCode,
             foundPartner: !!partnerInfo,
@@ -94,7 +94,7 @@ const verifySepayBookingWebhook = async (req, res, next) => {
       if (resolvedCode) {
         const booking = await Booking.findOne({ bookingCode: resolvedCode }).lean();
         if (booking && booking.partnerId) {
-          partnerInfo = await PartnerInformation.findOne({ accountId: booking.partnerId }).lean();
+          partnerInfo = await PartnerInformation.findOne({ accountId: booking.partnerId }).select('+sepayKeyEncrypted').lean();
           console.log("[BOOKING AUTH][FALLBACK VIA CONTENT]", {
             bookingCode: resolvedCode,
             foundPartner: !!partnerInfo,
