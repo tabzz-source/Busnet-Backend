@@ -9,7 +9,7 @@ const tripRoutes = require('./trip.routes');
 const favouriteRoutes = require('./favourite.routes');
 const feedbackRoutes = require('./feedback.routes');
 const reportRoutes = require('./report.routes');
-
+const searchHistoryRoutes = require('./searchHistory.routes');
 
 const router = express.Router();
 
@@ -23,5 +23,6 @@ router.use('/trips', tripRoutes);
 router.use('/favourites', favouriteRoutes);
 router.use('/reports', reportRoutes);
 router.use('/feedbacks', feedbackRoutes);
+router.use('/search-history', searchHistoryRoutes);
 
 module.exports = router;

@@ -78,7 +78,7 @@ const sepayAuthMiddleware = async (req, res, next) => {
             query.push({ bankNumber: accNumber });
         }
 
-        const partner = await PartnerInformation.findOne({ $or: query });
+        const partner = await PartnerInformation.findOne({ $or: query }).select('+sepayKeyEncrypted');
         if (!partner) {
             return res.status(401).json({
                 success: false,

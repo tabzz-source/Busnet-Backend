@@ -64,7 +64,7 @@ const verifySepayBookingWebhook = async (req, res, next) => {
 
     const partnerInfo = await PartnerInformation.findOne({
       $or: query,
-    }).lean();
+    }).select('+sepayKeyEncrypted').lean();
 
     console.log("[BOOKING AUTH][PARTNER INFO RESULT]", {
       found: !!partnerInfo,

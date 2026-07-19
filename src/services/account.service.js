@@ -154,14 +154,6 @@ const updateMyProfile = async (accountId, data, file) => {
     account.dob = data.dob ? new Date(data.dob) : null;
   }
 
-//   if (file) {
-//     const uploadedProfileImage = await uploadToCloudinary(
-//       file.buffer,
-//       CUSTOMER_PROFILE_FOLDER,
-//     );
-//     account.profilePicture = uploadedProfileImage.secure_url;
-//   }
-
   if (file) {
     try {
       const uploadedProfileImage = await uploadToCloudinary(
@@ -169,7 +161,7 @@ const updateMyProfile = async (accountId, data, file) => {
         CUSTOMER_PROFILE_FOLDER,
       );
 
-      account.profilePicture = uploadedProfileImage.secure_url;
+      account.profilePicture = uploadedProfileImage.url;
     } catch (error) {
       console.log("Upload profile picture failed:", {
         message: error.message,
