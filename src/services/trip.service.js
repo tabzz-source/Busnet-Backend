@@ -81,12 +81,10 @@ const searchTrips = async (queryParams) => {
 
     const matchingRouteIds = matchingRoutes.map(r => r._id);
 
-    // Get time boundaries for the date (local time bounds)
-    const targetDate = new Date(targetDateStr);
-    const startOfDay = new Date(targetDate);
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date(targetDate);
-    endOfDay.setHours(23, 59, 59, 999);
+    // Get time boundaries for the date (UTC bounds without timezone offset shifting)
+    const dateOnlyStr = String(targetDateStr).split('T')[0];
+    const startOfDay = new Date(`${dateOnlyStr}T00:00:00.000Z`);
+    const endOfDay = new Date(`${dateOnlyStr}T23:59:59.999Z`);
 
     // 2. Scan active schedules on matching routes
     const activeSchedules = await Schedule.find({
@@ -211,6 +209,22 @@ const searchTrips = async (queryParams) => {
             return price >= min && price <= max;
         });
     }
+
+    // Filter out trips departing in less than 2 hours (120 minutes) from current time
+    const nowMs = Date.now();
+    const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
+    trips = trips.filter(trip => {
+        const depDate = new Date(trip.departureDate);
+        const year = depDate.getUTCFullYear();
+        const month = depDate.getUTCMonth();
+        const day = depDate.getUTCDate();
+        const minutes = trip.actualDepartureTime || 0;
+        const hours = Math.floor(minutes / 60);
+        const mins = minutes % 60;
+        const departureDateTime = new Date(Date.UTC(year, month, day, hours, mins));
+
+        return (departureDateTime.getTime() - nowMs) >= TWO_HOURS_MS;
+    });
 
     // 7. Get Operator profile details
     const partnerIds = [...new Set(trips.map(t => t.partnerId.toString()))];
@@ -383,6 +397,21 @@ const getTripBookingOptions = async (tripId) => {
 
     if (!trip) {
         throw new AppError('Trip not found', 404);
+    }
+
+    const nowMs = Date.now();
+    const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
+    const depDate = new Date(trip.departureDate);
+    const year = depDate.getUTCFullYear();
+    const month = depDate.getUTCMonth();
+    const day = depDate.getUTCDate();
+    const minutes = trip.actualDepartureTime || 0;
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    const departureDateTime = new Date(Date.UTC(year, month, day, hours, mins));
+
+    if ((departureDateTime.getTime() - nowMs) < TWO_HOURS_MS) {
+        throw new AppError('Trip is no longer open for booking (must book at least 2 hours before departure)', 400);
     }
 
     const [pickupPoints, dropoffPoints] = await Promise.all([

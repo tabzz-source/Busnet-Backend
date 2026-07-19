@@ -143,7 +143,21 @@ const updateMyProfile = async (accountId, data, file) => {
   }
 
   if (data.phone !== undefined) {
-    account.phone = data.phone.trim();
+    const trimmedPhone = data.phone ? data.phone.trim() : null;
+    if (trimmedPhone && trimmedPhone !== account.phone) {
+      const existingPhoneAccount = await Account.findOne({
+        phone: trimmedPhone,
+        _id: { $ne: accountId },
+        deletedAt: null,
+      });
+
+      if (existingPhoneAccount) {
+        throw new AppError("Phone number is already in use by another account", 400);
+      }
+      account.phone = trimmedPhone;
+    } else if (!trimmedPhone) {
+      account.phone = null;
+    }
   }
 
   if (data.gender !== undefined) {

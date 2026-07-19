@@ -26,12 +26,12 @@ const generateHoldToken = () => crypto.randomBytes(16).toString("hex");
 const buildPaymentContent = (bookingCode) => bookingCode;
 
 const getTripDateTime = (departureDate, minutes, addNextDay = false) => {
-  const date = new Date(departureDate);
-  date.setHours(0, 0, 0, 0);
-  date.setMinutes(minutes);
+  const dateStr = new Date(departureDate).toISOString().split('T')[0];
+  const date = new Date(`${dateStr}T00:00:00.000Z`);
+  date.setUTCMinutes(minutes);
 
   if (addNextDay) {
-    date.setDate(date.getDate() + 1);
+    date.setUTCDate(date.getUTCDate() + 1);
   }
 
   return date;
@@ -419,10 +419,12 @@ const buildPdfBuffer = (pages) => {
 const buildBookingTicketsPdf = async (customerId, bookingCode) => {
   const normalizedCode = String(bookingCode || "").trim().toUpperCase();
 
-  const booking = await Booking.findOne({
-    bookingCode: normalizedCode,
-    customerId,
-  })
+  const query = { bookingCode: normalizedCode };
+  if (customerId) {
+    query.customerId = customerId;
+  }
+
+  const booking = await Booking.findOne(query)
     .populate({
       path: "tripId",
       select:
@@ -786,6 +788,19 @@ const createBooking = async (customerId, payload) => {
 
   if (trip.status !== "OPEN") {
     throw new AppError("Trip is not open for booking", 400);
+  }
+
+  const depDate = new Date(trip.departureDate);
+  const year = depDate.getUTCFullYear();
+  const month = depDate.getUTCMonth();
+  const day = depDate.getUTCDate();
+  const minutes = trip.actualDepartureTime || 0;
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  const departureDateTime = new Date(Date.UTC(year, month, day, hours, mins));
+
+  if ((departureDateTime.getTime() - now.getTime()) < 2 * 60 * 60 * 1000) {
+    throw new AppError("Trips departing in less than 2 hours are no longer open for booking", 400);
   }
 
   const selectedSeats = trip.seats.filter((seat) =>
@@ -1298,6 +1313,96 @@ const getBookingTickets = async (customerId, bookingCode) => {
 
 const getBookingTicketsPdf = async (customerId, bookingCode) =>
   buildBookingTicketsPdf(customerId, bookingCode);
+
+const retrieveBookingPublic = async (email, bookingCode) => {
+  const normalizedCode = String(bookingCode || "").trim().toUpperCase();
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+
+  if (!normalizedCode || !normalizedEmail) {
+    throw new AppError("Email and bookingCode are required", 400);
+  }
+
+  const booking = await Booking.findOne({
+    bookingCode: normalizedCode,
+  })
+    .populate({
+      path: "tripId",
+      populate: [
+        {
+          path: "routeId",
+        },
+        {
+          path: "scheduleId",
+        },
+        {
+          path: "busId",
+        },
+      ],
+    })
+    .populate("partnerId")
+    .populate("customerId")
+    .lean();
+
+  if (!booking) {
+    throw new AppError("Booking not found", 404);
+  }
+
+  const customerEmail = String(booking.customerId?.email || "").toLowerCase();
+  const passengerEmail = String(booking.passengerEmail || "").toLowerCase();
+
+  if (normalizedEmail !== customerEmail && normalizedEmail !== passengerEmail) {
+    throw new AppError("Invalid email or booking code", 400);
+  }
+
+  const seats = await BookingSeat.find({ bookingId: booking._id }).lean();
+
+  const partnerId = booking.partnerId?._id || booking.tripId?.partnerId;
+  const partnerInfo = partnerId ? await PartnerInformation.findOne({ accountId: partnerId }).lean() : null;
+
+  const tripRaw = booking.tripId || {};
+  const routeRaw = tripRaw.routeId || {};
+  const busRaw = tripRaw.busId || {};
+  const scheduleRaw = tripRaw.scheduleId || {};
+  const partnerAccount = booking.partnerId || {};
+
+  const routeName = routeRaw.routeName || (routeRaw.origin_provinceName && routeRaw.destination_provinceName ? `${routeRaw.origin_provinceName} → ${routeRaw.destination_provinceName}` : (routeRaw.originProvince && routeRaw.destinationProvince ? `${routeRaw.originProvince} → ${routeRaw.destinationProvince}` : 'N/A'));
+
+  let departureTime = scheduleRaw.departureTime;
+  if (!departureTime && tripRaw.actualDepartureTime !== undefined) {
+    const hours = Math.floor(tripRaw.actualDepartureTime / 60).toString().padStart(2, '0');
+    const mins = (tripRaw.actualDepartureTime % 60).toString().padStart(2, '0');
+    departureTime = `${hours}:${mins}`;
+  }
+
+  const formattedTrip = {
+    _id: tripRaw._id,
+    tripCode: tripRaw.tripCode,
+    departureDate: tripRaw.departureDate || booking.createdAt,
+    departureTime: departureTime || '08:00',
+    route: {
+      routeName: routeName,
+      originProvince: routeRaw.origin_provinceName || routeRaw.originProvince || '',
+      destinationProvince: routeRaw.destination_provinceName || routeRaw.destinationProvince || '',
+      distanceKm: routeRaw.distanceKm,
+      estimatedDuration: routeRaw.estimatedDuration,
+    },
+    bus: {
+      busName: busRaw.busName || 'Bus',
+      busType: busRaw.busType || 'Standard',
+      licensePlate: busRaw.licensePlate || 'N/A',
+    },
+    operator: {
+      operatorName: partnerInfo?.operatorName || partnerAccount?.fullName || 'BusNet Operator',
+      operatorPhone: partnerInfo?.operatorPhone || partnerAccount?.phone || 'N/A',
+    },
+  };
+
+  return {
+    booking,
+    trip: formattedTrip,
+    seats,
+  };
+};
 
 const releaseHeldSeatsForBooking = async (booking) => {
   const bookingSeats = await BookingSeat.find({
@@ -1905,6 +2010,7 @@ module.exports = {
   completeArrivedBookings,
   cancelBooking,
   requestCancelBooking,
+  retrieveBookingPublic,
   cleanupFailedBooking,
   processSepayBookingPayment,
   createTicketsForPaidBooking,
