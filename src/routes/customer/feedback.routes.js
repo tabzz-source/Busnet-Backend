@@ -5,6 +5,7 @@ const authenticate = require('../../middlewares/auth.middleware');
 const validate = require('../../middlewares/validate.middleware');
 const {
     validateCreateFeedback,
+    validateCreateOperatorFeedback,
     validateTripId,
     validatePartnerId
 } = require('../../validations/feedback.validation');
@@ -43,6 +44,13 @@ router.post(
     validateCreateFeedback,
     validate,
     feedbackController.createFeedback
+);
+
+router.post(
+    '/operators/:partnerId',
+    validateCreateOperatorFeedback,
+    validate,
+    feedbackController.createOperatorFeedback
 );
 
 router.get(

@@ -13,7 +13,10 @@ const generateSepayQrUrl = ({
     template = bookingEnv.sepayQrTemplate || 'compact',
     baseUrl = bookingEnv.sepayQrBaseUrl || 'https://qr.sepay.vn/img'
 }) => {
-    const normalizedBank = String(bankName || '').trim();
+    let normalizedBank = String(bankName || '').trim();
+    if (normalizedBank.toUpperCase() === 'BID') {
+        normalizedBank = 'BIDV';
+    }
     const normalizedAccount = String(bankNumber || '').replace(/\s+/g, '').trim();
     const normalizedHolder = normalizeAccountName(bankAccountName).toUpperCase();
     const safeAmount = Math.round(Number(amount));
@@ -56,7 +59,10 @@ const createBookingPaymentTransaction = async ({
 
     const bankName = partnerInfo?.bankName || partnerInfo?.operatorName;
     const bankCode = partnerInfo?.bankCode || partnerInfo?.sepayBankCode;
-    const bankNumber = partnerInfo?.bankNumber || partnerInfo?.sepayAccountNumber;
+    const bankNumber =
+        partnerInfo?.sepayVa ||
+        partnerInfo?.bankNumber ||
+        partnerInfo?.sepayAccountNumber;
     const bankAccountName = partnerInfo?.bankAccountName || partnerInfo?.operatorName;
 
     if (!bankName || !bankNumber || !bankAccountName) {

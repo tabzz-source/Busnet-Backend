@@ -5,6 +5,8 @@ const customerBookingController = require('../../controllers/customer/customerBo
 
 const router = express.Router();
 
+router.post('/retrieve', customerBookingController.retrieveBooking);
+
 router.post('/', authenticate, customerBookingController.createBooking);
 
 router.get('/', authenticate, customerBookingController.getMyBookings);
@@ -12,6 +14,8 @@ router.get('/', authenticate, customerBookingController.getMyBookings);
 router.get('/:bookingCode/status', authenticate, customerBookingController.getBookingStatus);
 
 router.get('/:bookingCode/payment', authenticate, customerBookingController.getBookingPayment);
+
+router.post('/:bookingCode/cancel-request', authenticate, customerBookingController.requestCancelBooking);
 
 router.post('/:bookingCode/cancel', authenticate, customerBookingController.cancelBooking);
 

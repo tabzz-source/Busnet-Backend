@@ -17,6 +17,9 @@ const blogPostSchema = new mongoose.Schema(
             type: String,
             required: true
         },
+        markdown: {
+            type: String
+        },
         summary: {
             type: String,
             maxLength: 300

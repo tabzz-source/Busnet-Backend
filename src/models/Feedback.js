@@ -6,7 +6,7 @@ const feedbackSchema = new mongoose.Schema(
         bookingId: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'Booking',
-            required: true,
+            default: null,
             index: true
         },
 
@@ -63,8 +63,24 @@ const feedbackSchema = new mongoose.Schema(
 );
 
 feedbackSchema.index(
-    { bookingId: 1, customerId: 1 },
-    { unique: true }
+    { bookingId: 1, customerId: 1, type: 1 },
+    {
+        unique: true,
+        partialFilterExpression: {
+            bookingId: { $type: 'objectId' },
+            type: 'TRIP'
+        }
+    }
+);
+
+feedbackSchema.index(
+    { partnerId: 1, customerId: 1, type: 1 },
+    {
+        unique: true,
+        partialFilterExpression: {
+            type: 'OPERATOR'
+        }
+    }
 );
 
 module.exports = mongoose.model('Feedback', feedbackSchema);
