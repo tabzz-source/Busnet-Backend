@@ -33,15 +33,6 @@ const createRules = [
         .trim()
         .notEmpty().withMessage('Destination province name is required'),
 
-    body('distanceKm')
-        .notEmpty().withMessage('Distance is required')
-        .isFloat({ gt: 0 })
-        .withMessage('Distance must be greater than 0'),
-
-    body('estimatedDuration')
-        .notEmpty().withMessage('Estimated duration is required')
-        .isInt({ gt: 0 })
-        .withMessage('Estimated duration must be greater than 0')
 ];
 
 const updateRules = [
@@ -58,16 +49,6 @@ const updateRules = [
     body('destination_province')
         .optional()
         .trim(),
-
-    body('distanceKm')
-        .optional()
-        .isFloat({ gt: 0 })
-        .withMessage('Distance must be greater than 0'),
-
-    body('estimatedDuration')
-        .optional()
-        .isInt({ gt: 0 })
-        .withMessage('Estimated duration must be greater than 0'),
 
     body().custom((value, { req }) => {
         const origin = req.body.origin_province;
