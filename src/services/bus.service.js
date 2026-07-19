@@ -10,7 +10,10 @@ exports.getMyBuses = async (partnerId, query) => {
         limit = 5,
         keyword,
         status,
-        isActive
+        busType,
+        isActive,
+        minSeats,
+        maxSeats
     } = query;
 
     const filter = {
@@ -33,6 +36,28 @@ exports.getMyBuses = async (partnerId, query) => {
         filter.isActive = isActive === 'true';
     }
 
+    if (busType) {
+        filter.busType = busType;
+    }
+
+    if (status) {
+        filter.status = status;
+    }
+
+    if (minSeats || maxSeats) {
+
+        filter.totalSeats = {};
+
+        if (minSeats) {
+            filter.totalSeats.$gte = Number(minSeats);
+        }
+
+        if (maxSeats) {
+            filter.totalSeats.$lte = Number(maxSeats);
+        }
+
+    }
+    
     const buses = await Bus.find(filter)
         .select(
             'busName licensePlate busType totalSeats status seatLayout_totalFloors createdAt'
