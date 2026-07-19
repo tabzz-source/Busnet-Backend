@@ -3,6 +3,7 @@ const Route = require('../models/Route');
 const Trip = require('../models/Trip');
 const Booking = require('../models/Booking');
 const geoCode = require('./geocode.service')
+const SubscriptionHistory = require('../models/SubscriptionHistory');
 
 exports.getMyRoutes = async (partnerId, query) => {
     const {
@@ -37,7 +38,31 @@ exports.getMyRoutes = async (partnerId, query) => {
         .skip((page - 1) * limit)
         .limit(Number(limit));
 
+    const activeSubscription = await SubscriptionHistory.findOne({
+        partnerId,
+        subscriptionStatus: 'ACTIVE',
+        expirationDate: { $gte: new Date() }
+    }).populate('planId');
+
+
     const total = await Route.countDocuments(filter);
+
+    let usage = null;
+
+    if (activeSubscription) {
+        const plan = activeSubscription.planId;
+
+        const isLimitReached =
+            plan.maxRoutes > 0 &&
+            total >= plan.maxRoutes;
+
+        usage = {
+            planName: plan.planName,
+            maxRoutes: plan.maxRoutes,
+            currentRoutes: total,
+            canCreate: !isLimitReached
+        };
+    }
 
     return {
         data: routes,
@@ -46,7 +71,8 @@ exports.getMyRoutes = async (partnerId, query) => {
             limit: Number(limit),
             total,
             totalPages: Math.ceil(total / limit)
-        }
+        },
+        usage
     };
 };
 
