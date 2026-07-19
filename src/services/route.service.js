@@ -13,7 +13,6 @@ exports.getMyRoutes = async (partnerId, query) => {
 
     const filter = {
         partnerId,
-        deletedAt: null
     };
 
     if (keyword) {
@@ -183,3 +182,4 @@ exports.toggleRouteStatus = async (routeId, partnerId, isActive) => {
 
     return route;
 };
+
