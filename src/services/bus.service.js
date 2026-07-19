@@ -2,7 +2,7 @@
 const Bus = require('../models/Bus');
 const BusSeat = require('../models/BusSeat');
 const Trip = require('../models/Trip');
-
+const SubscriptionHistory = require('../models/SubscriptionHistory')
 
 exports.getMyBuses = async (partnerId, query) => {
     const {
@@ -61,6 +61,31 @@ exports.getMyBuses = async (partnerId, query) => {
     }));
 
     const total = await Bus.countDocuments(filter);
+
+    const activeSubscription = await SubscriptionHistory.findOne({
+        partnerId,
+        subscriptionStatus: 'ACTIVE',
+        expirationDate: { $gte: new Date() }
+    }).populate('planId');
+
+
+    let usage = null;
+
+    if (activeSubscription) {
+        const plan = activeSubscription.planId;
+
+        const isLimitReached =
+            plan.maxBuses > 0 &&
+            total >= plan.maxBuses;
+
+        usage = {
+            planName: plan.planName,
+            maxBuses: plan.maxBuses,
+            currentBuses: total,
+            canCreate: !isLimitReached
+        };
+    }
+
     return {
         data: busesWithStatus,
         pagination: {
@@ -68,7 +93,8 @@ exports.getMyBuses = async (partnerId, query) => {
             limit: Number(limit),
             total,
             totalPages: Math.ceil(total / limit)
-        }
+        },
+        usage
     };
 };
 
