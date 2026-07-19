@@ -169,7 +169,7 @@ const createPartnerBlog = async (partnerId, blogData) => {
         metaTitle: metaTitle || title,
         metaDescription: metaDescription || summary || ''
     });
-    
+
     return blog;
 };
 

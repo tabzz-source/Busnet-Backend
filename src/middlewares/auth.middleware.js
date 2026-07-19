@@ -33,6 +33,14 @@ const protect = async (req, res, next) => {
             });
         }
 
+        if (user.role === 'ADMIN' && user.emailVerifyLockedUntil && user.emailVerifyLockedUntil > new Date()) {
+            const daysLeft = Math.ceil((user.emailVerifyLockedUntil.getTime() - Date.now()) / (24 * 60 * 60 * 1000));
+            return res.status(403).json({
+                success: false,
+                message: `Account is temporarily locked due to repeated failed verification attempts. Try again in ${daysLeft} day(s) (until ${user.emailVerifyLockedUntil.toISOString()}).`
+            });
+        }
+
         req.user = user;
         next();
     } catch (error) {

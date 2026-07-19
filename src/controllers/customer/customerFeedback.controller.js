@@ -17,6 +17,22 @@ const createFeedback = asyncHandler(async (req, res) => {
     );
 });
 
+const createOperatorFeedback = asyncHandler(async (req, res) => {
+    const customerId = req.user.id;
+    const { partnerId } = req.params;
+
+    const feedback = await feedbackService.createOperatorFeedback(customerId, partnerId, req.body);
+
+    return successResponse(
+        res,
+        201,
+        'Operator feedback created successfully',
+        {
+            feedback
+        }
+    );
+});
+
 const getMyFeedbacks = asyncHandler(async (req, res) => {
     const customerId = req.user.id;
 
@@ -64,6 +80,7 @@ const getFeedbacksByPartner = asyncHandler(async (req, res) => {
 
 module.exports = {
     createFeedback,
+    createOperatorFeedback,
     getMyFeedbacks,
     getFeedbacksByTrip,
     getFeedbacksByPartner

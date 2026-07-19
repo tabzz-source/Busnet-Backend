@@ -3,6 +3,7 @@ const Route = require('../models/Route');
 const Schedule = require('../models/Schedule');
 const PartnerInformation = require('../models/PartnerInformation');
 const Bus = require('../models/Bus');
+const Booking = require('../models/Booking');
 const AppError = require('../utils/AppError');
 
 /**
@@ -14,6 +15,83 @@ const timeToMinutes = (timeStr) => {
     if (!timeStr) return 0;
     const [hours, minutes] = timeStr.split(':').map(Number);
     return hours * 60 + minutes;
+};
+
+// Calendar-day-only comparison — strips time-of-day so a Schedule's
+// startDate/endDate/exceptionDates/customDates (stored as UTC midnight from
+// "YYYY-MM-DD" form inputs) compare correctly against targetDate (already
+// normalized to local midnight by the caller, matching how startOfDay/
+// endOfDay are built elsewhere in this file).
+const dateOnly = (d) => {
+    const x = new Date(d);
+    x.setHours(0, 0, 0, 0);
+    return x;
+};
+
+const sameDate = (a, b) => dateOnly(a).getTime() === dateOnly(b).getTime();
+
+/**
+ * Whether a Schedule actually runs on targetDate, given its recurrence rule.
+ * Previously trip generation ignored recurrenceType/recurrenceRule entirely
+ * and spawned a trip for every active schedule on every queried date — this
+ * is what schedules its occurrence for real:
+ *   - startDate/endDate always bound the window, regardless of frequency.
+ *   - exceptionDates always skip that day even if the frequency would
+ *     otherwise match (e.g. a holiday exception on an otherwise-daily route).
+ *   - NONE/ONCE occurs only on startDate itself.
+ *   - CUSTOM occurs only on dates listed in customDates.
+ *   - WEEKLY occurs on days whose Date.getDay() (0=Sun..6=Sat) is in
+ *     daysOfWeek; falls back to startDate's own weekday if daysOfWeek is
+ *     empty (defensive default for older data saved before the picker UI
+ *     existed).
+ *   - MONTHLY occurs on days whose Date.getDate() (1-31) is in daysOfMonth;
+ *     same fallback to startDate's day-of-month if empty.
+ *   - DAILY occurs every day in the window, honoring recurrenceRule.interval
+ *     (every N days from startDate) when set above 1.
+ */
+const scheduleOccursOnDate = (schedule, targetDate) => {
+    const rule = schedule.recurrenceRule || {};
+    const target = dateOnly(targetDate);
+
+    if (rule.startDate && target < dateOnly(rule.startDate)) return false;
+    if (rule.endDate && target > dateOnly(rule.endDate)) return false;
+
+    const exceptionDates = schedule.exceptionDates || [];
+    if (exceptionDates.some((d) => sameDate(d, target))) return false;
+
+    const frequency = rule.frequency || schedule.recurrenceType || 'DAILY';
+
+    if (frequency === 'NONE' || schedule.recurrenceType === 'ONCE') {
+        return !!rule.startDate && sameDate(rule.startDate, target);
+    }
+
+    if (frequency === 'CUSTOM') {
+        const customDates = schedule.customDates || [];
+        return customDates.some((d) => sameDate(d, target));
+    }
+
+    if (frequency === 'WEEKLY') {
+        const daysOfWeek = rule.daysOfWeek && rule.daysOfWeek.length > 0
+            ? rule.daysOfWeek
+            : (rule.startDate ? [dateOnly(rule.startDate).getDay()] : []);
+        return daysOfWeek.includes(target.getDay());
+    }
+
+    if (frequency === 'MONTHLY') {
+        const daysOfMonth = rule.daysOfMonth && rule.daysOfMonth.length > 0
+            ? rule.daysOfMonth
+            : (rule.startDate ? [dateOnly(rule.startDate).getDate()] : []);
+        return daysOfMonth.includes(target.getDate());
+    }
+
+    // DAILY (default)
+    const interval = rule.interval && rule.interval > 1 ? rule.interval : 1;
+    if (interval > 1 && rule.startDate) {
+        const msPerDay = 24 * 60 * 60 * 1000;
+        const daysSinceStart = Math.round((target.getTime() - dateOnly(rule.startDate).getTime()) / msPerDay);
+        return daysSinceStart >= 0 && daysSinceStart % interval === 0;
+    }
+    return true;
 };
 
 /**
@@ -100,10 +178,11 @@ const searchTrips = async (queryParams) => {
 
     const existingScheduleIds = new Set(existingTrips.map(t => t.scheduleId.toString()));
 
-    // 4. Dynamically generate trips for schedules that don't have one yet
+    // 4. Dynamically generate trips for schedules that don't have one yet and
+    // actually run on this date per their recurrence rule
     const tripsToCreate = [];
     for (const schedule of activeSchedules) {
-        if (!existingScheduleIds.has(schedule._id.toString())) {
+        if (!existingScheduleIds.has(schedule._id.toString()) && scheduleOccursOnDate(schedule, startOfDay)) {
             // Generate seat layouts dynamically based on bus dimensions
             const seats = [];
             const bus = schedule.busId;
@@ -140,6 +219,7 @@ const searchTrips = async (queryParams) => {
                 departureDate: startOfDay,
                 actualDepartureTime: depMinutes,
                 actualArrivalTime: arrMinutes,
+                arrivalDayOffset: schedule.arrivalDayOffset || 0,
                 totalSeats: seats.length,
                 availableSeats: seats.length,
                 seats,
@@ -244,6 +324,7 @@ const searchTrips = async (queryParams) => {
             departureDate: trip.departureDate,
             actualDepartureTime: trip.actualDepartureTime,
             actualArrivalTime: trip.actualArrivalTime,
+            arrivalDayOffset: trip.arrivalDayOffset || 0,
             totalSeats: trip.totalSeats,
             availableSeats: trip.availableSeats,
             status: trip.status,
@@ -346,6 +427,7 @@ const getTripDetail = async (tripId) => {
             departureDate: trip.departureDate,
             actualDepartureTime: trip.actualDepartureTime,
             actualArrivalTime: trip.actualArrivalTime,
+            arrivalDayOffset: trip.arrivalDayOffset || 0,
             totalSeats: trip.totalSeats,
             availableSeats: trip.availableSeats,
             bookedSeats: trip.bookedSeats,
@@ -432,6 +514,7 @@ const getTripBookingOptions = async (tripId) => {
             departureDate: trip.departureDate,
             actualDepartureTime: trip.actualDepartureTime,
             actualArrivalTime: trip.actualArrivalTime,
+            arrivalDayOffset: trip.arrivalDayOffset || 0,
             totalSeats: trip.totalSeats,
             availableSeats: trip.availableSeats,
             bookedSeats: trip.bookedSeats,
@@ -455,9 +538,126 @@ const getTripBookingOptions = async (tripId) => {
     };
 };
 
+const getPopularRoutes = async () => {
+    // 1. Get date 30 days ago
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    // 2. Aggregate Bookings to find most popular routes
+    const bookingAggregation = await Booking.aggregate([
+        {
+            $match: {
+                createdAt: { $gte: thirtyDaysAgo },
+                status: { $in: ['CONFIRMED', 'COMPLETED'] }
+            }
+        },
+        {
+            $lookup: {
+                from: 'trips',
+                localField: 'tripId',
+                foreignField: '_id',
+                as: 'trip'
+            }
+        },
+        { $unwind: '$trip' },
+        {
+            $group: {
+                _id: '$trip.routeId',
+                bookingCount: { $sum: 1 }
+            }
+        },
+        { $sort: { bookingCount: -1 } },
+        { $limit: 8 }
+    ]);
+
+    let popularRouteIds = bookingAggregation.map(item => item._id);
+
+    // 3. Fallback: If less than 5 popular routes, retrieve seeded routes marked isPopular: true
+    if (popularRouteIds.length < 5) {
+        const seededPopularRoutes = await Route.find({
+            isPopular: true,
+            isActive: true,
+            deletedAt: null
+        }).limit(8);
+        
+        const seededRouteIds = seededPopularRoutes.map(r => r._id);
+        
+        // Combine preserving uniqueness
+        const idSet = new Set(popularRouteIds.map(id => id.toString()));
+        for (const rId of seededRouteIds) {
+            if (!idSet.has(rId.toString())) {
+                popularRouteIds.push(rId);
+            }
+        }
+    }
+
+    // 4. Fetch the full Route documents for these IDs
+    const routes = await Route.find({
+        _id: { $in: popularRouteIds },
+        isActive: true,
+        deletedAt: null
+    });
+
+    // Fetch partner details for all routes to show operatorName
+    const partnerIds = routes.map(r => r.partnerId);
+    const partnerInfos = await PartnerInformation.find({ accountId: { $in: partnerIds } });
+    const partnerMap = {};
+    partnerInfos.forEach(p => {
+        partnerMap[p.accountId.toString()] = p.operatorName;
+    });
+
+    // 5. Calculate minimum ticket price among active schedules for each route
+    const formattedRoutes = await Promise.all(
+        routes.map(async (route) => {
+            const activeSchedules = await Schedule.find({
+                routeId: route._id,
+                isActive: true
+            });
+
+            let minPrice = 0;
+            if (activeSchedules.length > 0) {
+                minPrice = Math.min(...activeSchedules.map((s) => s.basePrice || 0));
+            } else {
+                // Baseline: standard price based on distance
+                minPrice = (route.distanceKm || 120) * 1000;
+            }
+
+            const operatorName = partnerMap[route.partnerId.toString()] || "BusNet Partner";
+
+            return {
+                _id: route._id,
+                routeName: route.routeName,
+                origin_provinceName: route.origin_provinceName,
+                destination_provinceName: route.destination_provinceName,
+                distanceKm: route.distanceKm,
+                estimatedDuration: route.estimatedDuration,
+                minPrice,
+                operatorName
+            };
+        })
+    );
+
+    // Preserve order of popularRouteIds
+    const routeMap = {};
+    formattedRoutes.forEach(r => {
+        routeMap[r._id.toString()] = r;
+    });
+
+    const sortedRoutes = [];
+    popularRouteIds.forEach(id => {
+        const idStr = id.toString();
+        if (routeMap[idStr]) {
+            sortedRoutes.push(routeMap[idStr]);
+        }
+    });
+
+    return sortedRoutes.slice(0, 8);
+};
+
 module.exports = {
     searchTrips,
     getLocations,
     getTripDetail,
-    getTripBookingOptions
+    getTripBookingOptions,
+    getPopularRoutes
 };

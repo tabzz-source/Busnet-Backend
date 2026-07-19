@@ -96,6 +96,8 @@ const retrieveBookingPublic = asyncHandler(async (req, res) => {
     return successResponse(res, 200, 'Booking retrieved successfully', data);
 });
 
+const retrieveBooking = retrieveBookingPublic;
+
 module.exports = {
     createBooking,
     getMyBookings,
@@ -106,5 +108,6 @@ module.exports = {
     getBookingTickets,
     cancelBooking,
     requestCancelBooking,
-    retrieveBookingPublic
+    retrieveBookingPublic,
+    retrieveBooking
 };

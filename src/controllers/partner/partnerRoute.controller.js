@@ -3,6 +3,8 @@ const routeService = require('../../services/route.service');
 
 exports.getMyRoutes = async (req, res) => {
     try {
+        
+
         const result = await routeService.getMyRoutes(
             req.user?.id,
             req.query
@@ -92,7 +94,7 @@ exports.toggleRouteStatus = async (req, res) => {
         const { routeId } = req.params;
         const { isActive } = req.body;
 
-        
+
         const route = await routeService.toggleRouteStatus(
             routeId,
             req.user?.id,

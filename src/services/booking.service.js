@@ -428,7 +428,7 @@ const buildBookingTicketsPdf = async (customerId, bookingCode) => {
     .populate({
       path: "tripId",
       select:
-        "tripCode departureDate actualDepartureTime actualArrivalTime routeId partnerId",
+        "tripCode departureDate actualDepartureTime actualArrivalTime arrivalDayOffset routeId partnerId",
       populate: {
         path: "routeId",
         select:
@@ -703,6 +703,7 @@ const getPartnerPaymentInfo = async (partnerId) => {
     partnerInfo.bankName;
 
   const accountNumber =
+    partnerInfo.sepayVa ||
     partnerInfo.sepayAccountNumber ||
     partnerInfo.bankNumber ||
     partnerInfo.bankAccountNumber;
@@ -1120,7 +1121,7 @@ const getMyBookings = async (customerId, query = {}) => {
       .populate({
         path: "tripId",
         select:
-          "tripCode departureDate actualDepartureTime actualArrivalTime status routeId",
+          "tripCode departureDate actualDepartureTime actualArrivalTime arrivalDayOffset status routeId",
         populate: {
           path: "routeId",
           select: "routeName originProvince destinationProvince",
@@ -1159,7 +1160,7 @@ const getBookingByCodeForCustomer = async (customerId, bookingCode) => {
     .populate({
       path: "tripId",
       select:
-        "tripCode departureDate actualDepartureTime actualArrivalTime status routeId scheduleId busId partnerId",
+        "tripCode departureDate actualDepartureTime actualArrivalTime arrivalDayOffset status routeId scheduleId busId partnerId",
       populate: [
         {
           path: "routeId",
@@ -1188,6 +1189,49 @@ const getBookingByCodeForCustomer = async (customerId, bookingCode) => {
   return booking;
 };
 
+const formatTripForBooking = (booking) => {
+  const trip = booking.tripId;
+  if (!trip) return null;
+
+  const partner = booking.partnerId || trip.partnerId;
+
+  return {
+    _id: trip._id,
+    tripCode: trip.tripCode,
+    departureDate: trip.departureDate,
+    departureTime: formatMinutesToClock(trip.actualDepartureTime),
+    arrivalTime: formatMinutesToClock(trip.actualArrivalTime),
+    actualDepartureTime: trip.actualDepartureTime,
+    actualArrivalTime: trip.actualArrivalTime,
+    totalSeats: trip.totalSeats,
+    availableSeats: trip.availableSeats,
+    status: trip.status,
+    route: trip.routeId ? {
+      routeName: trip.routeId.routeName,
+      originProvince: trip.routeId.originProvince,
+      originDistrict: trip.routeId.originDistrict,
+      destinationProvince: trip.routeId.destinationProvince,
+      destinationDistrict: trip.routeId.destinationDistrict,
+      distanceKm: trip.routeId.distanceKm,
+      estimatedDuration: trip.routeId.estimatedDuration,
+      origin_representativeAddress: trip.routeId.origin_representativeAddress,
+      destination_representativeAddress: trip.routeId.destination_representativeAddress,
+    } : null,
+    bus: trip.busId ? {
+      busId: trip.busId._id,
+      busName: trip.busId.busName,
+      busType: trip.busId.busType,
+      totalSeats: trip.busId.totalSeats,
+      licensePlate: trip.busId.licensePlate,
+    } : null,
+    operator: partner ? {
+      accountId: partner._id,
+      operatorName: partner.fullName || partner.operatorName || "BusNet Operator",
+      profilePicture: partner.profilePicture || null,
+    } : null,
+  };
+};
+
 const getBookingDetail = async (customerId, bookingCode) => {
   const booking = await getBookingByCodeForCustomer(customerId, bookingCode);
 
@@ -1198,6 +1242,7 @@ const getBookingDetail = async (customerId, bookingCode) => {
 
   return {
     booking,
+    trip: formatTripForBooking(booking),
     seats,
     transaction,
   };
@@ -1997,6 +2042,68 @@ const requestCancelBooking = async (customerId, bookingCode, reason = "") => {
   throw new AppError("Only confirmed paid bookings can request cancellation", 400);
 };
 
+const retrieveBookingPublic = async (email, bookingCode) => {
+  const normalizedCode = String(bookingCode || "").trim().toUpperCase();
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+
+  if (!normalizedCode || !normalizedEmail) {
+    throw new AppError("Email and booking code are required", 400);
+  }
+
+  const booking = await Booking.findOne({ bookingCode: normalizedCode })
+    .populate({
+      path: "tripId",
+      select:
+        "tripCode departureDate actualDepartureTime actualArrivalTime status routeId scheduleId busId partnerId",
+      populate: [
+        {
+          path: "routeId",
+          select:
+            "routeName originProvince originDistrict destinationProvince destinationDistrict distanceKm estimatedDuration origin_provinceName destination_provinceName origin_districtName destination_districtName",
+        },
+        {
+          path: "scheduleId",
+          select: "scheduleCode departureTime arrivalTime recurrenceType",
+        },
+        {
+          path: "busId",
+          select: "busName busType totalSeats licensePlate images",
+        },
+      ],
+    })
+    .populate({
+      path: "partnerId",
+      select: "fullName email phone profilePicture",
+    })
+    .populate({
+      path: "customerId",
+      select: "email fullName phone",
+    });
+
+  if (!booking) {
+    throw new AppError("Booking not found", 404);
+  }
+
+  const bPassengerEmail = String(booking.passengerEmail || "").trim().toLowerCase();
+  const bCustomerEmail = booking.customerId ? String(booking.customerId.email || "").trim().toLowerCase() : "";
+
+  if (bPassengerEmail !== normalizedEmail && bCustomerEmail !== normalizedEmail) {
+    throw new AppError("Email address does not match this booking code", 400);
+  }
+
+  const [seats, transaction] = await Promise.all([
+    BookingSeat.find({ bookingId: booking._id }).lean(),
+    Transaction.findOne({ bookingId: booking._id }).lean(),
+  ]);
+
+  return {
+    booking,
+    trip: formatTripForBooking(booking),
+    seats,
+    transaction,
+  };
+};
+
 module.exports = {
   createBooking,
   getMyBookings,
@@ -2014,4 +2121,5 @@ module.exports = {
   cleanupFailedBooking,
   processSepayBookingPayment,
   createTicketsForPaidBooking,
+  retrieveBookingPublic,
 };

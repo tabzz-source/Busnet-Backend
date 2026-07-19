@@ -66,6 +66,53 @@ const sendVerificationEmail = async (email, code) => {
 };
 
 /**
+ * Send Email Verification Code (OTP) for an Admin's own account settings.
+ * Distinct copy from sendVerificationEmail — that one is customer-registration
+ * flavored ("Welcome to BusNet! Thank you for registering...") which doesn't
+ * fit an existing admin verifying their own email from Settings.
+ * @param {string} email - Destination email
+ * @param {string} code - 6-digit verification code
+ */
+const sendAdminVerificationEmail = async (email, code) => {
+    const mailOptions = {
+        from: process.env.EMAIL_FROM || '"BusNet" <no-reply@busnet.com>',
+        to: email,
+        subject: '[BusNet] Verify Your Admin Account Email',
+        html: `
+            <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px; background-color: #ffffff;">
+                <div style="text-align: center; border-bottom: 2px solid #3b82f6; padding-bottom: 20px; margin-bottom: 20px;">
+                    <h1 style="color: #1e3a8a; margin: 0; font-size: 28px; letter-spacing: 1px;">BusNet</h1>
+                    <p style="color: #64748b; margin: 5px 0 0 0; font-size: 14px;">Admin Console</p>
+                </div>
+                <div style="padding: 10px 20px;">
+                    <h2 style="color: #0f172a; margin-top: 0; font-size: 20px;">Confirm Your Email Address</h2>
+                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
+                        You requested to verify the email address on your BusNet Admin Console account. Enter the 6-digit code below to confirm it's you:
+                    </p>
+                    <div style="text-align: center; margin: 30px 0;">
+                        <span style="display: inline-block; font-family: monospace; font-size: 36px; font-weight: bold; letter-spacing: 6px; color: #3b82f6; background-color: #eff6ff; padding: 15px 30px; border: 1px dashed #3b82f6; border-radius: 6px; box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.1);">
+                            ${code}
+                        </span>
+                    </div>
+                    <p style="color: #ef4444; font-size: 14px; font-weight: 500; margin-bottom: 25px;">
+                        * This verification code is valid for <strong>10 minutes</strong>. Please do not share this code with anyone.
+                    </p>
+                    <p style="color: #334155; line-height: 1.6; font-size: 15px;">
+                        If you did not request this, you can safely ignore this email — your account remains secure.
+                    </p>
+                </div>
+                <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 12px; color: #94a3b8;">
+                    <p style="margin: 0 0 5px 0;">&copy; ${new Date().getFullYear()} BusNet Project. All rights reserved.</p>
+                    <p style="margin: 0;">This is an automated email. Please do not reply to this message.</p>
+                </div>
+            </div>
+        `
+    };
+
+    return transporter.sendMail(mailOptions);
+};
+
+/**
  * Send Password Reset Verification Code (OTP)
  * @param {string} email - Destination email
  * @param {string} code - 6-digit verification code
@@ -332,8 +379,7 @@ const sendLicenseApprovedEmail = async (email, operatorName) => {
         from: process.env.EMAIL_FROM || '"BusNet" <no-reply@busnet.com>',
         to: email,
         subject: '[BusNet] Business License Approved - Complete Your Registration',
-        html: `
-            <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);">
+         <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);">
                 <div style="text-align: center; border-bottom: 2px solid #10b981; padding-bottom: 20px; margin-bottom: 25px;">
                     <h1 style="color: #064e3b; margin: 0; font-size: 28px; letter-spacing: 1px; font-weight: 800;">BusNet</h1>
                     <p style="color: #047857; margin: 5px 0 0 0; font-size: 14px; font-weight: 500;">Smart Bus Operator Platform</p>
@@ -476,8 +522,60 @@ const sendBlogRejectedEmail = async (email, blogTitle, reason) => {
 };
 
 
+/**
+ * Send Report Resolved Email to the customer who filed the report.
+ * @param {string} email - Reporter email
+ * @param {string} customerName - Reporter display name
+ * @param {string} reportReason - Original report description
+ * @param {string} [adminNote] - Admin's response/resolution note
+ */
+const sendReportResolvedEmail = async (email, customerName, reportReason, adminNote) => {
+    const mailOptions = {
+        from: process.env.EMAIL_FROM || '"BusNet" <no-reply@busnet.com>',
+        to: email,
+        subject: '[BusNet] Your report has been resolved',
+        html: `
+            <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);">
+                <div style="text-align: center; border-bottom: 2px solid #10b981; padding-bottom: 20px; margin-bottom: 25px;">
+                    <h1 style="color: #064e3b; margin: 0; font-size: 28px; letter-spacing: 1px; font-weight: 800;">BusNet</h1>
+                    <p style="color: #047857; margin: 5px 0 0 0; font-size: 14px; font-weight: 500;">Your Premium Bus Transportation Network</p>
+                </div>
+                <div style="padding: 10px 10px;">
+                    <h2 style="color: #0f172a; margin-top: 0; font-size: 22px; font-weight: 700; text-align: center;">Your Report Has Been Resolved ✅</h2>
+                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
+                        Dear <strong>${customerName || 'Customer'}</strong>,
+                    </p>
+                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
+                        Thank you for bringing this to our attention. Our support team has reviewed and resolved the report you submitted:
+                    </p>
+                    <div style="background-color: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px 20px; margin: 20px 0;">
+                        <p style="color: #475569; font-size: 14px; font-weight: 600; margin: 0 0 6px 0;">Your report:</p>
+                        <p style="color: #334155; font-size: 15px; margin: 0;">${reportReason || 'N/A'}</p>
+                    </div>
+                    ${adminNote ? `
+                    <div style="background-color: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 8px; padding: 15px 20px; margin: 20px 0;">
+                        <p style="color: #065f46; font-size: 14px; font-weight: 600; margin: 0 0 6px 0;">Our response:</p>
+                        <p style="color: #065f46; font-size: 15px; margin: 0;">${adminNote}</p>
+                    </div>
+                    ` : ''}
+                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
+                        If you have any further questions, feel free to submit a new report or contact our support team.
+                    </p>
+                </div>
+                <div style="margin-top: 35px; padding-top: 20px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 12px; color: #94a3b8;">
+                    <p style="margin: 0 0 5px 0;">&copy; ${new Date().getFullYear()} BusNet Project. All rights reserved.</p>
+                    <p style="margin: 0;">This is an automated email. Please do not reply to this message.</p>
+                </div>
+            </div>
+        `
+    };
+
+    return transporter.sendMail(mailOptions);
+};
+
 module.exports = {
     sendVerificationEmail,
+    sendAdminVerificationEmail,
     sendPasswordResetEmail,
     sendPartnerWelcomeEmail,
     sendBookingConfirmationEmail,
@@ -485,6 +583,7 @@ module.exports = {
     sendLicenseApprovedEmail,
     sendLicenseRejectedEmail,
     sendBlogApprovedEmail,
-    sendBlogRejectedEmail
+    sendBlogRejectedEmail,
+    sendReportResolvedEmail
 };
 

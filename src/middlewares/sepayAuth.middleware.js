@@ -70,15 +70,13 @@ const sepayAuthMiddleware = async (req, res, next) => {
             });
         }
 
-        const query = [];
+        let partner = null;
         if (vaNumber) {
-            query.push({ sepayVa: vaNumber });
+            partner = await PartnerInformation.findOne({ sepayVa: vaNumber }).select('+sepayKeyEncrypted');
         }
-        if (accNumber) {
-            query.push({ bankNumber: accNumber });
+        if (!partner && accNumber) {
+            partner = await PartnerInformation.findOne({ bankNumber: accNumber }).select('+sepayKeyEncrypted');
         }
-
-        const partner = await PartnerInformation.findOne({ $or: query }).select('+sepayKeyEncrypted');
         if (!partner) {
             return res.status(401).json({
                 success: false,

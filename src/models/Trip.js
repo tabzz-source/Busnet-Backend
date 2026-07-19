@@ -112,6 +112,15 @@ const tripSchema = new mongoose.Schema(
             max: 1439
         },
 
+        // Copied from Schedule.arrivalDayOffset at generation time — the
+        // number of calendar days after departureDate that actualArrivalTime
+        // falls on (0 = same day, 1 = next day, 2+ = multi-night route).
+        arrivalDayOffset: {
+            type: Number,
+            default: 0,
+            min: 0
+        },
+
         totalSeats: {
             type: Number,
             required: true,
