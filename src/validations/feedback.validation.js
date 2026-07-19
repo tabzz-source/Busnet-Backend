@@ -36,6 +36,37 @@ const validateCreateFeedback = [
         .withMessage('Invalid feedback type')
 ];
 
+const validateCreateOperatorFeedback = [
+    param('partnerId')
+        .notEmpty()
+        .withMessage('Partner ID is required')
+        .isMongoId()
+        .withMessage('Invalid partner ID'),
+
+    body('rating')
+        .notEmpty()
+        .withMessage('Rating is required')
+        .isInt({ min: 1, max: 5 })
+        .withMessage('Rating must be an integer between 1 and 5'),
+
+    body('review')
+        .optional()
+        .isLength({ max: 2000 })
+        .withMessage('Review must not exceed 2000 characters')
+        .trim(),
+
+    body('reviewImages')
+        .optional()
+        .isArray()
+        .withMessage('Review images must be an array'),
+
+    body('reviewImages.*')
+        .optional()
+        .isString()
+        .withMessage('Each review image must be a string')
+        .trim()
+];
+
 const validateTripId = [
     param('tripId')
         .notEmpty()
@@ -54,6 +85,7 @@ const validatePartnerId = [
 
 module.exports = {
     validateCreateFeedback,
+    validateCreateOperatorFeedback,
     validateTripId,
     validatePartnerId
 };
