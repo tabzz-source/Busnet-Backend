@@ -10,7 +10,21 @@ exports.getMyRoutes = async (partnerId, query) => {
         page = 1,
         limit = 5,
         keyword,
-        isActive
+        isActive,
+
+        originProvince,
+        destinationProvince,
+
+        isPopular,
+
+        minDistance,
+        maxDistance,
+
+        minDuration,
+        maxDuration,
+
+        sortBy = 'createdAt',
+        sortOrder = 'desc'
     } = query;
 
 
@@ -30,12 +44,52 @@ exports.getMyRoutes = async (partnerId, query) => {
         filter.isActive = isActive === 'true';
     }
 
+    if (isPopular !== undefined) {
+        filter.isPopular = isPopular === 'true';
+    }
+
+    if (originProvince) {
+        filter.origin_province = originProvince;
+    }
+
+    if (destinationProvince) {
+        filter.destination_province = destinationProvince;
+    }
+
+    if (minDistance || maxDistance) {
+        filter.distanceKm = {};
+
+        if (minDistance) {
+            filter.distanceKm.$gte = Number(minDistance);
+        }
+
+        if (maxDistance) {
+            filter.distanceKm.$lte = Number(maxDistance);
+        }
+    }
+
+    if (minDuration || maxDuration) {
+        filter.estimatedDuration = {};
+
+        if (minDuration) {
+            filter.estimatedDuration.$gte = Number(minDuration);
+        }
+
+        if (maxDuration) {
+            filter.estimatedDuration.$lte = Number(maxDuration);
+        }
+    }
+
+    const sort = {
+        [sortBy]: sortOrder === 'asc' ? 1 : -1
+    };
+
     const routes = await Route.find(filter)
         .select(
-            'routeName origin_provinceName destination_provinceName distanceKm estimatedDuration isActive'
+            'routeName origin_provinceName destination_provinceName distanceKm estimatedDuration isActive isPopular'
         )
-        .sort({ createdAt: -1 })
-        .skip((page - 1) * limit)
+        .sort(sort)
+        .skip((page - 1) * Number(limit))
         .limit(Number(limit));
 
     const activeSubscription = await SubscriptionHistory.findOne({
@@ -45,7 +99,11 @@ exports.getMyRoutes = async (partnerId, query) => {
     }).populate('planId');
 
 
-    const total = await Route.countDocuments(filter);
+    const filteredTotal = await Route.countDocuments(filter);
+    const totalRoutes = await Route.countDocuments({
+        partnerId,
+        deletedAt: null
+    });
 
     let usage = null;
 
@@ -54,12 +112,12 @@ exports.getMyRoutes = async (partnerId, query) => {
 
         const isLimitReached =
             plan.maxRoutes > 0 &&
-            total >= plan.maxRoutes;
+            totalRoutes >= plan.maxRoutes;
 
         usage = {
             planName: plan.planName,
             maxRoutes: plan.maxRoutes,
-            currentRoutes: total,
+            currentRoutes: totalRoutes,
             canCreate: !isLimitReached
         };
     }
@@ -69,8 +127,8 @@ exports.getMyRoutes = async (partnerId, query) => {
         pagination: {
             page: Number(page),
             limit: Number(limit),
-            total,
-            totalPages: Math.ceil(total / limit)
+            total: filteredTotal,
+            totalPages: Math.ceil(filteredTotal / limit)
         },
         usage
     };
