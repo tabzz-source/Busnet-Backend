@@ -5,6 +5,7 @@ const Route = require('../models/Route');
 const Bus = require('../models/Bus');
 const Trip = require('../models/Trip');
 const AppError = require('../utils/AppError');
+const { repriceFutureAvailableSeats } = require('./ticketPricingResolver.service');
 
 const generateScheduleCode = () => {
     const timestamp = Date.now().toString(36).toUpperCase();
@@ -438,11 +439,7 @@ const updateSchedule = async (partnerId, scheduleId, data) => {
     // Only touch seats nobody has booked/held yet; already-committed seats
     // (and past/non-OPEN trips) are left untouched.
     if (basePrice !== undefined && basePrice !== oldBasePrice) {
-        await Trip.updateMany(
-            { scheduleId, departureDate: { $gte: new Date() }, status: 'OPEN' },
-            { $set: { 'seats.$[seat].price': basePrice } },
-            { arrayFilters: [{ 'seat.status': 'AVAILABLE' }] }
-        );
+        await repriceFutureAvailableSeats(schedule);
     }
 
     if (pickupPoints && pickupPoints.length > 0) {

@@ -4,7 +4,10 @@ const Schedule = require('../models/Schedule');
 const PartnerInformation = require('../models/PartnerInformation');
 const Bus = require('../models/Bus');
 const Booking = require('../models/Booking');
+const TicketPrice = require('../models/TicketPrice');
+const BusSeat = require('../models/BusSeat');
 const AppError = require('../utils/AppError');
+const { getTripDepartureDateTime, resolveSeatPrice } = require('./ticketPricingResolver.service');
 
 /**
  * Helper to convert time string (HH:MM) to minutes from midnight
@@ -15,6 +18,13 @@ const timeToMinutes = (timeStr) => {
     if (!timeStr) return 0;
     const [hours, minutes] = timeStr.split(':').map(Number);
     return hours * 60 + minutes;
+};
+
+const getLowestAvailableSeatPrice = (trip) => {
+    const seats = Array.isArray(trip.seats) ? trip.seats : [];
+    const availableSeats = seats.filter((seat) => seat.status === 'AVAILABLE');
+    if (availableSeats.length === 0) return 0;
+    return Math.min(...availableSeats.map((seat) => Number(seat.price || 0)));
 };
 
 // Calendar-day-only comparison — strips time-of-day so a Schedule's
@@ -178,6 +188,32 @@ const searchTrips = async (queryParams) => {
 
     const existingScheduleIds = new Set(existingTrips.map(t => t.scheduleId.toString()));
 
+    const scheduleIds = activeSchedules.map((schedule) => schedule._id);
+    const busIds = activeSchedules.map((schedule) => schedule.busId?._id || schedule.busId).filter(Boolean);
+    const [effectiveTicketPrices, configuredBusSeats] = await Promise.all([
+        TicketPrice.find({
+            scheduleId: { $in: scheduleIds },
+            isActive: true,
+            effectiveFrom: { $lte: endOfDay },
+            $or: [{ effectiveTo: null }, { effectiveTo: { $gte: startOfDay } }]
+        }).sort({ effectiveFrom: -1 }).lean(),
+        BusSeat.find({ busId: { $in: busIds }, isActive: true })
+            .sort({ floor: 1, row: 1, column: 1 })
+            .lean()
+    ]);
+    const pricesBySchedule = new Map();
+    for (const ticketPrice of effectiveTicketPrices) {
+        const key = ticketPrice.scheduleId.toString();
+        if (!pricesBySchedule.has(key)) pricesBySchedule.set(key, []);
+        pricesBySchedule.get(key).push(ticketPrice);
+    }
+    const seatsByBus = new Map();
+    for (const busSeat of configuredBusSeats) {
+        const key = busSeat.busId.toString();
+        if (!seatsByBus.has(key)) seatsByBus.set(key, []);
+        seatsByBus.get(key).push(busSeat);
+    }
+
     // 4. Dynamically generate trips for schedules that don't have one yet and
     // actually run on this date per their recurrence rule
     const tripsToCreate = [];
@@ -186,11 +222,32 @@ const searchTrips = async (queryParams) => {
             // Generate seat layouts dynamically based on bus dimensions
             const seats = [];
             const bus = schedule.busId;
+            const ticketPrices = pricesBySchedule.get(schedule._id.toString()) || [];
+            const busSeats = seatsByBus.get(bus._id.toString()) || [];
+            const departureDateTime = getTripDepartureDateTime(
+                startOfDay,
+                timeToMinutes(schedule.departureTime)
+            );
             const floors = bus.seatLayout_totalFloors || 1;
             const rows = bus.seatLayout_totalRows || 5;
             const cols = bus.seatLayout_totalColumns || 4;
 
-            for (let f = 1; f <= floors; f++) {
+            if (busSeats.length > 0) {
+                for (const busSeat of busSeats) {
+                    seats.push({
+                        seatCode: busSeat.seatCode,
+                        seatType: busSeat.seatType,
+                        price: resolveSeatPrice({
+                            ticketPrices,
+                            seatType: busSeat.seatType,
+                            departureDate: departureDateTime,
+                            basePrice: schedule.basePrice,
+                            priceModifier: busSeat.priceModifier
+                        }),
+                        status: 'AVAILABLE'
+                    });
+                }
+            } else for (let f = 1; f <= floors; f++) {
                 const floorPrefix = floors > 1 ? (f === 1 ? 'A' : 'B') : 'A';
                 for (let r = 1; r <= rows; r++) {
                     for (let c = 1; c <= cols; c++) {
@@ -198,7 +255,13 @@ const searchTrips = async (queryParams) => {
                         const seatCode = `${floorPrefix}${r}${colLetter}`;
                         seats.push({
                             seatCode,
-                            price: schedule.basePrice,
+                            seatType: 'STANDARD',
+                            price: resolveSeatPrice({
+                                ticketPrices,
+                                seatType: 'STANDARD',
+                                departureDate: departureDateTime,
+                                basePrice: schedule.basePrice
+                            }),
                             status: 'AVAILABLE'
                         });
                     }
@@ -285,7 +348,7 @@ const searchTrips = async (queryParams) => {
         const min = minPrice ? Number(minPrice) : 0;
         const max = maxPrice ? Number(maxPrice) : Infinity;
         trips = trips.filter(trip => {
-            const price = trip.seats && trip.seats.length > 0 ? trip.seats[0].price : 0;
+            const price = getLowestAvailableSeatPrice(trip);
             return price >= min && price <= max;
         });
     }
@@ -317,7 +380,7 @@ const searchTrips = async (queryParams) => {
     // 8. Map to clean output response structure
     let formattedTrips = trips.map(trip => {
         const partnerInfo = partnerInfoMap[trip.partnerId.toString()];
-        const price = trip.seats && trip.seats.length > 0 ? trip.seats[0].price : 0;
+        const price = getLowestAvailableSeatPrice(trip);
         return {
             _id: trip._id,
             tripCode: trip.tripCode,

@@ -3,6 +3,7 @@ const TicketPrice = require('../models/TicketPrice');
 const PricingAuditLog = require('../models/PricingAuditLog');
 const Schedule = require('../models/Schedule');
 const AppError = require('../utils/AppError');
+const { normalizeSeatType, repriceFutureAvailableSeats } = require('./ticketPricingResolver.service');
 
 const getEffectiveStatus = (ticketPrice, now) => {
     if (now < ticketPrice.effectiveFrom) return 'UPCOMING';
@@ -260,7 +261,7 @@ const setTicketPrice = async (partnerId, scheduleId, ticketPriceId, data) => {
             const overlapFilter = {
                 scheduleId,
                 partnerId,
-                seatType: data.seatType.trim(),
+                seatType: { $regex: `^${data.seatType.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
                 isActive: true,
                 effectiveFrom: effectiveTo ? { $lte: effectiveTo } : { $exists: true },
                 $or: [
@@ -290,7 +291,7 @@ const setTicketPrice = async (partnerId, scheduleId, ticketPriceId, data) => {
         const action = ticketPrice ? 'UPDATE' : 'CREATE';
 
         if (ticketPrice) {
-            ticketPrice.seatType = data.seatType.trim();
+            ticketPrice.seatType = normalizeSeatType(data.seatType);
             ticketPrice.price = price;
             ticketPrice.discount = discount;
             ticketPrice.effectiveFrom = effectiveFrom;
@@ -301,7 +302,7 @@ const setTicketPrice = async (partnerId, scheduleId, ticketPriceId, data) => {
             [ticketPrice] = await TicketPrice.create([{
                 scheduleId,
                 partnerId,
-                seatType: data.seatType.trim(),
+                seatType: normalizeSeatType(data.seatType),
                 price,
                 discount,
                 effectiveFrom,
@@ -313,6 +314,7 @@ const setTicketPrice = async (partnerId, scheduleId, ticketPriceId, data) => {
         const after = toPricingSnapshot(ticketPrice);
         const previous = before || { price: 0, discount: 0, finalPrice: 0 };
         let auditLog;
+        let repricing;
 
         try {
             [auditLog] = await PricingAuditLog.create([{
@@ -330,9 +332,14 @@ const setTicketPrice = async (partnerId, scheduleId, ticketPriceId, data) => {
                 },
                 actionAt: new Date()
             }], session ? { session } : {});
+            repricing = await repriceFutureAvailableSeats(schedule, session);
         } catch (error) {
-            // Standalone MongoDB has no transactions, so compensate if audit persistence fails.
+            // Standalone MongoDB has no transactions, so compensate if audit
+            // persistence or repricing fails.
             if (!session) {
+                if (auditLog) {
+                    await PricingAuditLog.deleteOne({ _id: auditLog._id, partnerId });
+                }
                 if (action === 'CREATE') {
                     await TicketPrice.deleteOne({ _id: ticketPrice._id, partnerId });
                 } else {
@@ -359,7 +366,8 @@ const setTicketPrice = async (partnerId, scheduleId, ticketPriceId, data) => {
                     ? Number(((after.discount / after.price) * 100).toFixed(2))
                     : 0
             },
-            auditLogId: auditLog._id
+            auditLogId: auditLog._id,
+            repricing
         };
     };
 
