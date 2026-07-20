@@ -1,5 +1,12 @@
 const nodemailer = require('nodemailer');
 
+const escapeHtml = (value) => String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+
 // Create reusable transporter object using the default SMTP transport
 const transporter = nodemailer.createTransport({
     host: process.env.EMAIL_HOST,
@@ -574,6 +581,66 @@ const sendReportResolvedEmail = async (email, customerName, reportReason, adminN
     return transporter.sendMail(mailOptions);
 };
 
+/**
+ * Notify a customer after a Partner responds to a booking cancellation request.
+ * @param {object} params
+ * @param {string} params.email - Customer email address
+ * @param {string} params.customerName - Passenger/customer display name
+ * @param {string} params.bookingCode - Booking code
+ * @param {'APPROVED'|'REJECTED'} params.decision - Cancellation result
+ * @param {string} [params.response] - Partner response or rejection reason
+ * @param {number} [params.refundAmount] - Approved refund amount
+ */
+const sendBookingCancellationResultEmail = async (params = {}) => {
+    const approved = params.decision === 'APPROVED';
+    const customerName = escapeHtml(params.customerName || 'Customer');
+    const bookingCode = escapeHtml(params.bookingCode || 'N/A');
+    const partnerResponse = escapeHtml(
+        params.response || (approved ? 'Your cancellation request was approved.' : 'No reason provided.')
+    );
+    const refundAmount = new Intl.NumberFormat('vi-VN').format(Number(params.refundAmount) || 0);
+    const accentColor = approved ? '#10b981' : '#ef4444';
+    const accentBackground = approved ? '#ecfdf5' : '#fef2f2';
+    const resultText = approved ? 'approved' : 'rejected';
+
+    const mailOptions = {
+        from: process.env.EMAIL_FROM || '"BusNet" <no-reply@busnet.com>',
+        to: params.email,
+        subject: `[BusNet] Cancellation request ${resultText} - ${bookingCode}`,
+        html: `
+            <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
+                <div style="text-align: center; border-bottom: 2px solid ${accentColor}; padding-bottom: 20px; margin-bottom: 25px;">
+                    <h1 style="color: #1e3a8a; margin: 0; font-size: 28px;">BusNet</h1>
+                    <p style="color: #64748b; margin: 5px 0 0; font-size: 14px;">Booking cancellation update</p>
+                </div>
+                <h2 style="color: #0f172a; font-size: 22px;">Cancellation request ${resultText}</h2>
+                <p style="color: #334155; line-height: 1.6;">Dear <strong>${customerName}</strong>,</p>
+                <p style="color: #334155; line-height: 1.6;">
+                    Your cancellation request for booking <strong>${bookingCode}</strong> has been
+                    <strong style="color: ${accentColor};">${resultText}</strong> by the bus operator.
+                </p>
+                <div style="background-color: ${accentBackground}; border: 1px solid ${accentColor}; border-radius: 8px; padding: 15px 20px; margin: 20px 0;">
+                    <p style="margin: 0 0 6px; color: #475569; font-size: 13px; font-weight: 600;">Operator response</p>
+                    <p style="margin: 0; color: #0f172a; line-height: 1.5;">${partnerResponse}</p>
+                </div>
+                ${approved ? `
+                    <div style="background-color: #f8fafc; border-radius: 8px; padding: 15px 20px; margin: 20px 0;">
+                        <p style="margin: 0; color: #334155;">Refund amount: <strong>${refundAmount} VND</strong></p>
+                    </div>
+                ` : `
+                    <p style="color: #334155; line-height: 1.6;">Your booking remains confirmed and your assigned seats are unchanged.</p>
+                `}
+                <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 12px; color: #94a3b8;">
+                    <p style="margin: 0 0 5px;">&copy; ${new Date().getFullYear()} BusNet Project. All rights reserved.</p>
+                    <p style="margin: 0;">This is an automated email. Please do not reply.</p>
+                </div>
+            </div>
+        `
+    };
+
+    return transporter.sendMail(mailOptions);
+};
+
 module.exports = {
     sendVerificationEmail,
     sendAdminVerificationEmail,
@@ -585,6 +652,7 @@ module.exports = {
     sendLicenseRejectedEmail,
     sendBlogApprovedEmail,
     sendBlogRejectedEmail,
-    sendReportResolvedEmail
+    sendReportResolvedEmail,
+    sendBookingCancellationResultEmail
 };
 

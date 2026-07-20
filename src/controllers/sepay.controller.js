@@ -5,6 +5,7 @@ const PartnerSubscription = require("../models/PartnerSubscription");
 const SubscriptionPlan = require("../models/SubscriptionPlan");
 const emailService = require("../services/email.service");
 const bookingService = require("../services/booking.service");
+const partnerSubscriptionService = require("../services/partnerSubscription.service");
 const asyncHandler = require("../utils/asyncHandler");
 const { successResponse } = require("../utils/response");
 const AppError = require("../utils/AppError");
@@ -125,6 +126,19 @@ const handleWebhook = asyncHandler(async (req, res) => {
     );
   }
 
+  if (transaction.status === "PROCESSING") {
+    return successResponse(res, 200, "Transaction is already being processed.", {
+      transactionId,
+    });
+  }
+
+  if (["EXPIRED", "CANCELLED", "REFUNDED"].includes(transaction.status)) {
+    return res.status(200).json({
+      success: false,
+      message: `Acknowledged: Transaction is ${transaction.status.toLowerCase()}`,
+    });
+  }
+
   // 4. Ensure incoming transfer (cash in: "in")
   if (transferType && transferType.toLowerCase() !== "in") {
     console.warn(
@@ -145,6 +159,10 @@ const handleWebhook = asyncHandler(async (req, res) => {
     );
     transaction.status = "FAILED";
     transaction.description = `Insufficient payment amount. Required: ${transaction.amount}, Received: ${transferAmount}`;
+    if (transaction.metadata?.renewalLock) {
+      delete transaction.metadata.renewalLock;
+      transaction.markModified('metadata');
+    }
     await transaction.save();
     return res
       .status(200)
@@ -154,8 +172,8 @@ const handleWebhook = asyncHandler(async (req, res) => {
       });
   }
 
-  // 6. Update Transaction details to success
-  transaction.status = "SUCCESS";
+  // 6. Claim the transaction while its business side-effects are applied.
+  transaction.status = "PROCESSING";
   transaction.sepayTransactionId = String(id);
   transaction.gateway = gateway || "SEPAY";
   transaction.transactionDate = transactionDate
@@ -175,6 +193,12 @@ const handleWebhook = asyncHandler(async (req, res) => {
 
     if (!accountId) {
       console.error(`[SePay Webhook] Transaction ${transactionId} has no partnerId.`);
+      transaction.status = 'FAILED';
+      if (transaction.metadata?.renewalLock) {
+        delete transaction.metadata.renewalLock;
+        transaction.markModified('metadata');
+      }
+      await transaction.save();
       return res.status(200).json({ success: false, message: 'Acknowledged: No partner linked to transaction' });
     }
 
@@ -195,8 +219,27 @@ const handleWebhook = asyncHandler(async (req, res) => {
       await partnerInfo.save();
     }
 
-    // C. Handle subscription (create new or renew existing)
-    if (!subscriptionId) {
+    // C. Handle initial activation or an authenticated renewal.
+    if (transaction.metadata?.operation === 'RENEW') {
+      try {
+        await partnerSubscriptionService.fulfillRenewal(transaction);
+        console.log(`[SePay Webhook] Renewed subscription ${subscriptionId}`);
+      } catch (error) {
+        transaction.status = 'FAILED';
+      transaction.metadata = {
+        ...(transaction.metadata || {}),
+        fulfillmentError: error.message
+      };
+      delete transaction.metadata.renewalLock;
+      transaction.markModified('metadata');
+        await transaction.save();
+        console.error(`[SePay Webhook] Subscription renewal failed for ${transactionId}:`, error.message);
+        return res.status(200).json({
+          success: false,
+          message: 'Payment received but subscription renewal requires review'
+        });
+      }
+    } else if (!subscriptionId) {
       // New registration: create PartnerSubscription
       const planId = (transaction.metadata && transaction.metadata.planId) || (partnerInfo && partnerInfo.selectedPlanId);
       const plan = await SubscriptionPlan.findById(planId);
@@ -242,13 +285,23 @@ const handleWebhook = asyncHandler(async (req, res) => {
     }
 
     // D. Send Partner Welcome Email
-    if (account && partnerInfo) {
+    if (account && partnerInfo && transaction.metadata?.operation !== 'RENEW') {
       const partnerLoginUrl = process.env.PARTNER_DASHBOARD_LOGIN_URL || 'http://localhost:5173/login';
       emailService.sendPartnerWelcomeEmail(account.email, partnerInfo.operatorName, partnerLoginUrl)
         .then(() => console.log(`[SePay Webhook] Welcome email sent successfully to ${account.email}`))
         .catch((err) => console.error(`[SePay Webhook] Error sending welcome email:`, err));
     }
   }
+
+  transaction.status = 'SUCCESS';
+  transaction.metadata = {
+    ...(transaction.metadata || {}),
+    fulfilledAt: new Date(),
+    fulfillmentError: null
+  };
+  delete transaction.metadata.renewalLock;
+  transaction.markModified('metadata');
+  await transaction.save();
 
   return successResponse(res, 200, "Payment webhook processed successfully.", {
     transactionId: transaction._id,

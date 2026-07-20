@@ -44,4 +44,9 @@ const subscriptionHistorySchema = new mongoose.Schema(
     }
 );
 
+subscriptionHistorySchema.index(
+    { transactionId: 1 },
+    { unique: true, sparse: true }
+);
+
 module.exports = mongoose.model('SubscriptionHistory', subscriptionHistorySchema);
