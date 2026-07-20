@@ -17,7 +17,7 @@ exports.getMyRoutes = async (partnerId, query) => {
     const filter = {
         partnerId,
     };
-
+    
     if (keyword) {
         filter.routeName = {
             $regex: keyword,
