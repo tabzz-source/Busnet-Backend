@@ -7,7 +7,9 @@ const Transaction = require('../models/Transaction');
 const Ticket = require('../models/Ticket');
 const PartnerInformation = require('../models/PartnerInformation');
 const Notification = require('../models/Notification');
+const Account = require('../models/Account');
 const AppError = require('../utils/AppError');
+const emailService = require('./email.service');
 
 const BOOKING_STATUSES = [
     'PENDING_PAYMENT',
@@ -119,6 +121,34 @@ const notifyCancellationResult = async (booking, decision, refundAmount, respons
         return true;
     } catch (error) {
         console.error('[Partner Booking] Failed to create cancellation notification:', error.message);
+        return false;
+    }
+};
+
+const emailCancellationResult = async (booking, decision, refundAmount, response) => {
+    try {
+        let recipientEmail = booking.passengerEmail;
+        if (!recipientEmail) {
+            const customer = await Account.findById(booking.customerId).select('email').lean();
+            recipientEmail = customer?.email;
+        }
+
+        if (!recipientEmail) {
+            console.warn(`[Partner Booking] Cancellation email skipped for ${booking.bookingCode}: customer email unavailable`);
+            return false;
+        }
+
+        await emailService.sendBookingCancellationResultEmail({
+            email: recipientEmail,
+            customerName: booking.passengerName,
+            bookingCode: booking.bookingCode,
+            decision: decision === 'APPROVE' ? 'APPROVED' : 'REJECTED',
+            response,
+            refundAmount
+        });
+        return true;
+    } catch (error) {
+        console.error('[Partner Booking] Failed to send cancellation result email:', error.message);
         return false;
     }
 };
@@ -605,6 +635,7 @@ const respondCancellationRequest = async (partnerId, bookingId, payload) => {
                 0,
                 response
             );
+            const emailSent = await emailCancellationResult(booking, decision, 0, response);
 
             return {
                 bookingId: booking._id,
@@ -615,7 +646,8 @@ const respondCancellationRequest = async (partnerId, bookingId, payload) => {
                 response,
                 assignedSeatsKept: true,
                 issuedTicketsKept: true,
-                notificationCreated
+                notificationCreated,
+                emailSent
             };
         }
 
@@ -735,6 +767,12 @@ const respondCancellationRequest = async (partnerId, bookingId, payload) => {
             refundAmount,
             booking.cancelResponse
         );
+        const emailSent = await emailCancellationResult(
+            booking,
+            decision,
+            refundAmount,
+            booking.cancelResponse
+        );
 
         return {
             bookingId: booking._id,
@@ -754,6 +792,7 @@ const respondCancellationRequest = async (partnerId, bookingId, payload) => {
             releasedSeatCodes,
             cancelledTicketCount: ticketResult.modifiedCount || 0,
             notificationCreated,
+            emailSent,
             respondedAt: booking.cancellationRespondedAt,
             respondedAtDisplay: formatDateTime(booking.cancellationRespondedAt)
         };
