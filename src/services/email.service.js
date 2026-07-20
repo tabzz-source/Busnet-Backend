@@ -66,6 +66,53 @@ const sendVerificationEmail = async (email, code) => {
 };
 
 /**
+ * Send Email Verification Code (OTP) for an Admin's own account settings.
+ * Distinct copy from sendVerificationEmail — that one is customer-registration
+ * flavored ("Welcome to BusNet! Thank you for registering...") which doesn't
+ * fit an existing admin verifying their own email from Settings.
+ * @param {string} email - Destination email
+ * @param {string} code - 6-digit verification code
+ */
+const sendAdminVerificationEmail = async (email, code) => {
+    const mailOptions = {
+        from: process.env.EMAIL_FROM || '"BusNet" <no-reply@busnet.com>',
+        to: email,
+        subject: '[BusNet] Verify Your Admin Account Email',
+        html: `
+            <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px; background-color: #ffffff;">
+                <div style="text-align: center; border-bottom: 2px solid #3b82f6; padding-bottom: 20px; margin-bottom: 20px;">
+                    <h1 style="color: #1e3a8a; margin: 0; font-size: 28px; letter-spacing: 1px;">BusNet</h1>
+                    <p style="color: #64748b; margin: 5px 0 0 0; font-size: 14px;">Admin Console</p>
+                </div>
+                <div style="padding: 10px 20px;">
+                    <h2 style="color: #0f172a; margin-top: 0; font-size: 20px;">Confirm Your Email Address</h2>
+                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
+                        You requested to verify the email address on your BusNet Admin Console account. Enter the 6-digit code below to confirm it's you:
+                    </p>
+                    <div style="text-align: center; margin: 30px 0;">
+                        <span style="display: inline-block; font-family: monospace; font-size: 36px; font-weight: bold; letter-spacing: 6px; color: #3b82f6; background-color: #eff6ff; padding: 15px 30px; border: 1px dashed #3b82f6; border-radius: 6px; box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.1);">
+                            ${code}
+                        </span>
+                    </div>
+                    <p style="color: #ef4444; font-size: 14px; font-weight: 500; margin-bottom: 25px;">
+                        * This verification code is valid for <strong>10 minutes</strong>. Please do not share this code with anyone.
+                    </p>
+                    <p style="color: #334155; line-height: 1.6; font-size: 15px;">
+                        If you did not request this, you can safely ignore this email — your account remains secure.
+                    </p>
+                </div>
+                <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 12px; color: #94a3b8;">
+                    <p style="margin: 0 0 5px 0;">&copy; ${new Date().getFullYear()} BusNet Project. All rights reserved.</p>
+                    <p style="margin: 0;">This is an automated email. Please do not reply to this message.</p>
+                </div>
+            </div>
+        `
+    };
+
+    return transporter.sendMail(mailOptions);
+};
+
+/**
  * Send Password Reset Verification Code (OTP)
  * @param {string} email - Destination email
  * @param {string} code - 6-digit verification code
@@ -199,60 +246,6 @@ const sendBookingConfirmationEmail = async (params = {}) => {
     const safeDeparture = departureTime !== null && departureTime !== undefined
         ? `${formatDateTime(departureDate)}${departureTime !== null ? ` (${departureTime})` : ''}`
         : formatDateTime(departureDate);
-}       
-/* * Send Pending Approval Email to Partner after successful payment
- * @param {string} email - Destination email
- * @param {string} operatorName - Partner operator name
- */
-const sendPartnerPendingApprovalEmail = async (email, operatorName) => {
-    const mailOptions = {
-        from: process.env.EMAIL_FROM || '"BusNet" <no-reply@busnet.com>',
-        to: email,
-        subject: '[BusNet] Payment Received - Account Verification Pending',
-        html: `
-            <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);">
-                <div style="text-align: center; border-bottom: 2px solid #f59e0b; padding-bottom: 20px; margin-bottom: 25px;">
-                    <h1 style="color: #78350f; margin: 0; font-size: 28px; letter-spacing: 1px; font-weight: 800;">BusNet</h1>
-                    <p style="color: #b45309; margin: 5px 0 0 0; font-size: 14px; font-weight: 500;">Smart Bus Operator Platform</p>
-                </div>
-                <div style="padding: 10px 10px;">
-                    <h2 style="color: #0f172a; margin-top: 0; font-size: 22px; font-weight: 700; text-align: center;">Subscription Payment Verified</h2>
-                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
-                        Dear <strong>${operatorName}</strong>,
-                    </p>
-                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
-                        We have successfully verified your subscription payment. Thank you for choosing BusNet!
-                    </p>
-                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
-                        Your account is currently in a <strong>Pending Approval</strong> state while our administrative team reviews your uploaded Business License. This verification process typically takes up to 24 hours.
-                    </p>
-                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
-                        Once approved, you will receive a confirmation email indicating that your account has been fully activated, and you will be able to log in and start configuring your workspace.
-                    </p>
-                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
-                        If you have any questions or need to provide additional details, please reply directly to this email or contact our support team.
-                    </p>
-                </div>
-                <div style="margin-top: 35px; padding-top: 20px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 12px; color: #94a3b8;">
-                    <p style="margin: 0 0 5px 0;">&copy; ${new Date().getFullYear()} BusNet Project. All rights reserved.</p>
-                    <p style="margin: 0;">This is an automated email. Please do not reply to this message.</p>
-                </div>
-            </div>
-        `
-    };
-
-    return transporter.sendMail(mailOptions);
-};
-
-/**
- * Send License Approved Email to Partner
- * @param {string} email - Destination email
- * @param {string} operatorName - Partner operator name
- */
-const sendLicenseApprovedEmail = async (email, operatorName) => {
-    const registerUrl = process.env.CUSTOMER_WEB_URL
-        ? `${process.env.CUSTOMER_WEB_URL}/register-operator`
-        : 'http://localhost:5174/register-operator';
 
     const mailOptions = {
         from: process.env.EMAIL_FROM || '"BusNet" <no-reply@busnet.com>',
@@ -317,8 +310,77 @@ const sendLicenseApprovedEmail = async (email, operatorName) => {
                 </div>
 
                 <div style="margin-top: 28px; padding-top: 18px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 12px; color: #94a3b8;">
+                    <p style="margin: 0 0 5px 0;">&copy; ${new Date().getFullYear()} BusNet Project. All rights reserved.</p>
+                    <p style="margin: 0;">This is an automated email. Please do not reply to this message.</p>
+                </div>
+            </div>
+        `
+    };
+
+    return transporter.sendMail(mailOptions);
+};
+
+/**
+ * Send Pending Approval Email to Partner after successful payment
+ * @param {string} email - Destination email
+ * @param {string} operatorName - Partner operator name
+ */
+const sendPartnerPendingApprovalEmail = async (email, operatorName) => {
+    const mailOptions = {
+        from: process.env.EMAIL_FROM || '"BusNet" <no-reply@busnet.com>',
+        to: email,
+        subject: '[BusNet] Payment Received - Account Verification Pending',
+        html: `
+            <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);">
+                <div style="text-align: center; border-bottom: 2px solid #f59e0b; padding-bottom: 20px; margin-bottom: 25px;">
+                    <h1 style="color: #78350f; margin: 0; font-size: 28px; letter-spacing: 1px; font-weight: 800;">BusNet</h1>
+                    <p style="color: #b45309; margin: 5px 0 0 0; font-size: 14px; font-weight: 500;">Smart Bus Operator Platform</p>
+                </div>
+                <div style="padding: 10px 10px;">
+                    <h2 style="color: #0f172a; margin-top: 0; font-size: 22px; font-weight: 700; text-align: center;">Subscription Payment Verified</h2>
+                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
+                        Dear <strong>${operatorName}</strong>,
+                    </p>
+                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
+                        We have successfully verified your subscription payment. Thank you for choosing BusNet!
+                    </p>
+                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
+                        Your account is currently in a <strong>Pending Approval</strong> state while our administrative team reviews your uploaded Business License. This verification process typically takes up to 24 hours.
+                    </p>
+                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
+                        Once approved, you will receive a confirmation email indicating that your account has been fully activated, and you will be able to log in and start configuring your workspace.
+                    </p>
+                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
+                        If you have any questions or need to provide additional details, please reply directly to this email or contact our support team.
+                    </p>
+                </div>
+                <div style="margin-top: 35px; padding-top: 20px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 12px; color: #94a3b8;">
+                    <p style="margin: 0 0 5px 0;">&copy; ${new Date().getFullYear()} BusNet Project. All rights reserved.</p>
+                    <p style="margin: 0;">This is an automated email. Please do not reply to this message.</p>
+                </div>
+            </div>
+        `
+    };
+
+    return transporter.sendMail(mailOptions);
+};
+
+/**
+ * Send License Approved Email to Partner
+ * @param {string} email - Destination email
+ * @param {string} operatorName - Partner operator name
+ */
+const sendLicenseApprovedEmail = async (email, operatorName) => {
+    const registerUrl = process.env.CUSTOMER_WEB_URL
+        ? `${process.env.CUSTOMER_WEB_URL}/register-operator`
+        : 'http://localhost:5174/register-operator';
+
+    const mailOptions = {
+        from: process.env.EMAIL_FROM || '"BusNet" <no-reply@busnet.com>',
+        to: email,
         subject: '[BusNet] Business License Approved - Complete Your Registration',
-         <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);">
+        html: `
+            <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);">
                 <div style="text-align: center; border-bottom: 2px solid #10b981; padding-bottom: 20px; margin-bottom: 25px;">
                     <h1 style="color: #064e3b; margin: 0; font-size: 28px; letter-spacing: 1px; font-weight: 800;">BusNet</h1>
                     <p style="color: #047857; margin: 5px 0 0 0; font-size: 14px; font-weight: 500;">Smart Bus Operator Platform</p>
@@ -409,13 +471,120 @@ const sendLicenseRejectedEmail = async (email, operatorName, rejectionReason) =>
     return transporter.sendMail(mailOptions);
 };
 
+// New email functions for blog approval/rejection
+/**
+ * Send Email to Partner when their blog is approved and published.
+ * @param {string} email - Partner email address
+ * @param {string} blogTitle - Title of the approved blog
+ */
+const sendBlogApprovedEmail = async (email, blogTitle) => {
+    const mailOptions = {
+        from: process.env.EMAIL_FROM || "BusNet <no-reply@busnet.com>",
+        to: email,
+        subject: `[BusNet] Your blog "${blogTitle}" has been approved!`,
+        html: `
+            <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
+                <h2 style="color: #064e3b; margin: 0 0 15px; font-size: 24px;">Blog Approved 🎉</h2>
+                <p>Hello,</p>
+                <p>Your blog post <strong>${blogTitle}</strong> has been reviewed and approved by the admin team. It is now live on the platform.</p>
+                <p>Thank you for contributing to BusNet!</p>
+                <hr style="margin: 20px 0; border: none; border-top: 1px solid #e2e8f0;"/>
+                <p style="font-size: 12px; color: #64748b;">This is an automated email, please do not reply.</p>
+            </div>
+        `
+    };
+    return transporter.sendMail(mailOptions);
+};
+
+/**
+ * Send Email to Partner when their blog is rejected.
+ * @param {string} email - Partner email address
+ * @param {string} blogTitle - Title of the rejected blog
+ * @param {string} reason - Reason for rejection
+ */
+const sendBlogRejectedEmail = async (email, blogTitle, reason) => {
+    const mailOptions = {
+        from: process.env.EMAIL_FROM || "BusNet <no-reply@busnet.com>",
+        to: email,
+        subject: `[BusNet] Your blog "${blogTitle}" was rejected`,
+        html: `
+            <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #fff7f7;">
+                <h2 style="color: #7f1d1d; margin: 0 0 15px; font-size: 24px;">Blog Rejected ❌</h2>
+                <p>Hello,</p>
+                <p>Unfortunately, your blog post <strong>${blogTitle}</strong> did not meet our publishing guidelines.</p>
+                <p><strong>Reason:</strong> ${reason || 'Not provided'}</p>
+                <p>Please edit your post and resubmit for review.</p>
+                <hr style="margin: 20px 0; border: none; border-top: 1px solid #e2e8f0;"/>
+                <p style="font-size: 12px; color: #64748b;">This is an automated email, please do not reply.</p>
+            </div>
+        `
+    };
+    return transporter.sendMail(mailOptions);
+};
+
+
+/**
+ * Send Report Resolved Email to the customer who filed the report.
+ * @param {string} email - Reporter email
+ * @param {string} customerName - Reporter display name
+ * @param {string} reportReason - Original report description
+ * @param {string} [adminNote] - Admin's response/resolution note
+ */
+const sendReportResolvedEmail = async (email, customerName, reportReason, adminNote) => {
+    const mailOptions = {
+        from: process.env.EMAIL_FROM || '"BusNet" <no-reply@busnet.com>',
+        to: email,
+        subject: '[BusNet] Your report has been resolved',
+        html: `
+            <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);">
+                <div style="text-align: center; border-bottom: 2px solid #10b981; padding-bottom: 20px; margin-bottom: 25px;">
+                    <h1 style="color: #064e3b; margin: 0; font-size: 28px; letter-spacing: 1px; font-weight: 800;">BusNet</h1>
+                    <p style="color: #047857; margin: 5px 0 0 0; font-size: 14px; font-weight: 500;">Your Premium Bus Transportation Network</p>
+                </div>
+                <div style="padding: 10px 10px;">
+                    <h2 style="color: #0f172a; margin-top: 0; font-size: 22px; font-weight: 700; text-align: center;">Your Report Has Been Resolved ✅</h2>
+                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
+                        Dear <strong>${customerName || 'Customer'}</strong>,
+                    </p>
+                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
+                        Thank you for bringing this to our attention. Our support team has reviewed and resolved the report you submitted:
+                    </p>
+                    <div style="background-color: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px 20px; margin: 20px 0;">
+                        <p style="color: #475569; font-size: 14px; font-weight: 600; margin: 0 0 6px 0;">Your report:</p>
+                        <p style="color: #334155; font-size: 15px; margin: 0;">${reportReason || 'N/A'}</p>
+                    </div>
+                    ${adminNote ? `
+                    <div style="background-color: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 8px; padding: 15px 20px; margin: 20px 0;">
+                        <p style="color: #065f46; font-size: 14px; font-weight: 600; margin: 0 0 6px 0;">Our response:</p>
+                        <p style="color: #065f46; font-size: 15px; margin: 0;">${adminNote}</p>
+                    </div>
+                    ` : ''}
+                    <p style="color: #334155; line-height: 1.6; font-size: 16px;">
+                        If you have any further questions, feel free to submit a new report or contact our support team.
+                    </p>
+                </div>
+                <div style="margin-top: 35px; padding-top: 20px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 12px; color: #94a3b8;">
+                    <p style="margin: 0 0 5px 0;">&copy; ${new Date().getFullYear()} BusNet Project. All rights reserved.</p>
+                    <p style="margin: 0;">This is an automated email. Please do not reply to this message.</p>
+                </div>
+            </div>
+        `
+    };
+
+    return transporter.sendMail(mailOptions);
+};
+
 module.exports = {
     sendVerificationEmail,
+    sendAdminVerificationEmail,
     sendPasswordResetEmail,
     sendPartnerWelcomeEmail,
     sendBookingConfirmationEmail,
     sendPartnerPendingApprovalEmail,
     sendLicenseApprovedEmail,
-    sendLicenseRejectedEmail
+    sendLicenseRejectedEmail,
+    sendBlogApprovedEmail,
+    sendBlogRejectedEmail,
+    sendReportResolvedEmail
 };
 

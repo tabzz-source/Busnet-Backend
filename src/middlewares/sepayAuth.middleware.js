@@ -52,6 +52,13 @@ const sepayAuthMiddleware = async (req, res, next) => {
             return next();
         }
 
+        // Bypass check for SePay test webhooks (Gửi thử)
+        if (req.body && req.body.code === 'SEPAYTEST') {
+            console.log('[SePay Webhook Diagnostic] Bypassing auth check for SePay test webhook.');
+            req.isSePayAdmin = false;
+            return next();
+        }
+
         // 4. Check against Partner API Key (For passenger ticket purchases)
         const vaNumber = req.body.subAccount;
         const accNumber = req.body.accountNumber;
@@ -63,15 +70,13 @@ const sepayAuthMiddleware = async (req, res, next) => {
             });
         }
 
-        const query = [];
+        let partner = null;
         if (vaNumber) {
-            query.push({ sepayVa: vaNumber });
+            partner = await PartnerInformation.findOne({ sepayVa: vaNumber }).select('+sepayKeyEncrypted');
         }
-        if (accNumber) {
-            query.push({ bankNumber: accNumber });
+        if (!partner && accNumber) {
+            partner = await PartnerInformation.findOne({ bankNumber: accNumber }).select('+sepayKeyEncrypted');
         }
-
-        const partner = await PartnerInformation.findOne({ $or: query });
         if (!partner) {
             return res.status(401).json({
                 success: false,
@@ -79,7 +84,17 @@ const sepayAuthMiddleware = async (req, res, next) => {
             });
         }
 
-        const decryptedKey = sepayCrypto.decrypt(partner.sepayKeyEncrypted);
+        let decryptedKey = partner.sepayKeyEncrypted;
+        if (decryptedKey && decryptedKey.includes(':')) {
+            try {
+                const decrypted = sepayCrypto.decrypt(decryptedKey);
+                if (decrypted) {
+                    decryptedKey = decrypted;
+                }
+            } catch (err) {
+                console.error('Failed to decrypt fallback key:', err);
+            }
+        }
         if (!decryptedKey || decryptedKey !== extractedKey) {
             return res.status(401).json({
                 success: false,

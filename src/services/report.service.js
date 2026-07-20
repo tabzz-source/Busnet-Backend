@@ -1,14 +1,27 @@
 const Report = require('../models/Report');
 const AppError = require('../utils/AppError');
 
+// Which model a targetId belongs to, derived server-side from reportType
+// rather than trusted from the client — keeps a mismatched targetId/reportType
+// pair from ever pointing refPath at the wrong collection.
+const TARGET_MODEL_BY_REPORT_TYPE = {
+    TRIP: 'Trip',
+    BOOKING: 'Booking',
+    OPERATOR: 'Account',
+    PAYMENT: 'Transaction'
+};
+
 const createReport = async (accountId, payload) => {
-    const { reportType, description, reportImages = [] } = payload;
+    const { reportType, description, reportImages = [], targetId } = payload;
+    const targetModel = targetId ? TARGET_MODEL_BY_REPORT_TYPE[reportType] || null : null;
 
     const report = await Report.create({
         accountId,
         reportType,
         description,
         reportImages,
+        targetModel,
+        targetRefId: targetModel ? targetId : null,
         isResponse: false,
         responseDescription: '',
         status: 'PENDING'

@@ -159,6 +159,11 @@ const bookingSchema = new mongoose.Schema(
             default: null
         },
 
+        cancelRequestedAt: {
+            type: Date,
+            default: null
+        },
+
         cancelledAt: {
             type: Date,
             default: null

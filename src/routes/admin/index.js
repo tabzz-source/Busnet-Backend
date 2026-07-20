@@ -16,5 +16,6 @@ router.use('/partners', partnerRoutes);
 router.use('/subscriptions', subscriptionRoutes);
 router.use('/accounts', accountRoutes);
 router.use('/reports', reportRoutes);
+router.use('/blogs', require('./blog.routes'));
 
 module.exports = router;

@@ -5,11 +5,19 @@ const { restrictTo } = require('../../middlewares/role.middleware');
 const upload = require('../../middlewares/uploadMiddleware');
 const validate = require('../../middlewares/validate.middleware');
 const { PARTNER } = require('../../constants/roles');
+const { validateChangePassword } = require('../../validations/auth.validation');
 const { updatePartnerProfileValidation } = require('../../validations/partner.validation');
 const router = express.Router();
 
 // Get current partner's profile (protected route)
 router.get('/me', authenticate, restrictTo(PARTNER), partnerProfileController.getProfile);
+router.patch(
+    '/change-password',
+    authenticate,
+    restrictTo(PARTNER),
+    validateChangePassword,
+    partnerProfileController.changePassword
+);
 router.patch(
     '/me',
     authenticate,

@@ -3,6 +3,9 @@ const partnerAuthController = require('../../controllers/partner/partnerAuth.con
 const { validateRegisterOperator, validateContinueRegistration, validateCompletePayment, validateResubmitLicense } = require('../../validations/auth.validation');
 const authenticate = require('../../middlewares/auth.middleware');
 const { restrictTo } = require('../../middlewares/role.middleware');
+const { createLoginLimiter, createOtpLimiter } = require('../../middlewares/rateLimiter.middleware');
+const loginLimiter = createLoginLimiter();
+const otpLimiter = createOtpLimiter();
 const { PARTNER } = require('../../constants/roles');
 
 const router = express.Router();
@@ -20,13 +23,13 @@ router.post('/complete-payment', validateCompletePayment, partnerAuthController.
 router.post('/resubmit-license', validateResubmitLicense, partnerAuthController.resubmitLicense);
 
 // POST /api/partner/auth/send-verification-otp
-router.post('/send-verification-otp', partnerAuthController.sendVerificationOTP);
+router.post('/send-verification-otp', otpLimiter, partnerAuthController.sendVerificationOTP);
 
 // POST /api/partner/auth/verify-otp
-router.post('/verify-otp', partnerAuthController.verifyOTP);
+router.post('/verify-otp', otpLimiter, partnerAuthController.verifyOTP);
 
 // POST /api/partner/auth/login
-router.post('/login', partnerAuthController.login);
+router.post('/login', loginLimiter, partnerAuthController.login);
 
 // POST /api/partner/auth/logout
 router.post('/logout', authenticate, restrictTo(PARTNER), partnerAuthController.logout);
