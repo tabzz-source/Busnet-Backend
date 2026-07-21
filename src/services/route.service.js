@@ -91,7 +91,6 @@ exports.getRouteDetails = async (routeId, partnerId) => {
 
     return route;
 };
-
 exports.createRoute = async (partnerId, routeData) => {
     const existingRoute = await Route.findOne({
         partnerId,
@@ -224,7 +223,6 @@ exports.updateRoute = async (routeId, partnerId, updateData) => {
 
     return route;
 };
-
 exports.toggleRouteStatus = async (routeId, partnerId, isActive) => {
 
     const route = await Route.findOne({
@@ -265,3 +263,4 @@ exports.toggleRouteStatus = async (routeId, partnerId, isActive) => {
 
     return route;
 };
+

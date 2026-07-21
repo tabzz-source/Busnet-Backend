@@ -344,7 +344,94 @@ const fulfillRenewal = async (transaction) => {
     );
 };
 
+const getMySubscriptions = async (partnerId, query = {}) => {
+    const page = Math.max(Number(query.page) || 1, 1);
+    const limit = Math.min(Math.max(Number(query.limit) || 5, 1), 100);
+    if (!mongoose.isValidObjectId(partnerId)) throw new AppError('Invalid partner ID', 400);
+
+    const match = { partnerId: new mongoose.Types.ObjectId(partnerId) };
+    if (query.subscriptionStatus) match.subscriptionStatus = query.subscriptionStatus;
+    if (query.planId) {
+        if (!mongoose.isValidObjectId(query.planId)) throw new AppError('Invalid plan ID', 400);
+        match.planId = new mongoose.Types.ObjectId(query.planId);
+    }
+
+    const addDateRange = (field, from, to) => {
+        if (!from && !to) return;
+        match[field] = {};
+        if (from) match[field].$gte = new Date(from);
+        if (to) {
+            const end = new Date(to);
+            end.setHours(23, 59, 59, 999);
+            match[field].$lte = end;
+        }
+    };
+    addDateRange('subscriptionDate', query.subscriptionDateFrom, query.subscriptionDateTo);
+    addDateRange('expirationDate', query.expirationDateFrom, query.expirationDateTo);
+
+    const sortOptions = {
+        subscriptionDate_asc: { subscriptionDate: 1 },
+        subscriptionDate_desc: { subscriptionDate: -1 },
+        expirationDate_asc: { expirationDate: 1 },
+        expirationDate_desc: { expirationDate: -1 },
+        price_asc: { 'plan.price': 1 },
+        price_desc: { 'plan.price': -1 }
+    };
+    const pipeline = [
+        { $match: match },
+        {
+            $lookup: {
+                from: 'subscription_plans',
+                localField: 'planId',
+                foreignField: '_id',
+                as: 'plan'
+            }
+        },
+        { $unwind: '$plan' }
+    ];
+    if (query.keyword) {
+        pipeline.push({
+            $match: {
+                $or: [
+                    { 'plan.planName': { $regex: query.keyword, $options: 'i' } },
+                    { 'plan.code': { $regex: query.keyword, $options: 'i' } }
+                ]
+            }
+        });
+    }
+    pipeline.push({ $sort: sortOptions[query.sortBy] || sortOptions.subscriptionDate_desc });
+
+    const countResult = await SubscriptionHistory.aggregate([...pipeline, { $count: 'total' }]);
+    const total = countResult[0]?.total || 0;
+    pipeline.push(
+        { $skip: (page - 1) * limit },
+        { $limit: limit },
+        {
+            $project: {
+                subscriptionDate: 1,
+                expirationDate: 1,
+                subscriptionStatus: 1,
+                transactionId: 1,
+                plan: {
+                    _id: '$plan._id',
+                    planName: '$plan.planName',
+                    code: '$plan.code',
+                    price: '$plan.price',
+                    durationDays: '$plan.durationDays',
+                    discount: '$plan.discount'
+                }
+            }
+        }
+    );
+
+    return {
+        data: await SubscriptionHistory.aggregate(pipeline),
+        pagination: { page, limit, total, totalPages: Math.ceil(total / limit) }
+    };
+};
+
 module.exports = {
+    getMySubscriptions,
     getOverview,
     createRenewal,
     getRenewalStatus,

@@ -1,5 +1,6 @@
 const express = require('express');
 const sepayController = require('../../controllers/sepay.controller');
+const customerSubscriptionController = require('../../controllers/customer/customerSubscription.controller');
 const partnerSubscriptionController = require('../../controllers/partner/partnerSubscription.controller');
 const authenticate = require('../../middlewares/auth.middleware');
 const { restrictTo } = require('../../middlewares/role.middleware');
@@ -14,7 +15,12 @@ router.get('/status/:transactionId', sepayController.getTransactionStatus);
 
 router.use(authenticate, restrictTo(PARTNER));
 
-router.get('/', partnerSubscriptionController.getOverview);
+// Keep history at the original path and expose overview separately so both
+// subscription-management clients remain supported after the merge.
+router.get('/', partnerSubscriptionController.getMySubscriptions);
+router.get('/history', partnerSubscriptionController.getMySubscriptions);
+router.get('/overview', partnerSubscriptionController.getOverview);
+router.get('/plans', customerSubscriptionController.getSubscriptionPlans);
 router.post('/renew', partnerSubscriptionController.createRenewal);
 router.get(
     '/renew/:transactionId/status',

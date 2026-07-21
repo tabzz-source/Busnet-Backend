@@ -7,6 +7,11 @@ const getOverview = asyncHandler(async (req, res) => {
     return successResponse(res, 200, 'Subscription overview retrieved successfully', data);
 });
 
+const getMySubscriptions = asyncHandler(async (req, res) => {
+    const result = await partnerSubscriptionService.getMySubscriptions(req.user.id, req.query);
+    return res.status(200).json({ success: true, ...result });
+});
+
 const createRenewal = asyncHandler(async (req, res) => {
     const data = await partnerSubscriptionService.createRenewal(req.user.id);
     return successResponse(
@@ -37,6 +42,7 @@ const cancelRenewal = asyncHandler(async (req, res) => {
 
 module.exports = {
     getOverview,
+    getMySubscriptions,
     createRenewal,
     getRenewalStatus,
     cancelRenewal
