@@ -5,7 +5,10 @@ const partnerSubscriptionController = require('../../controllers/partner/partner
 const authenticate = require('../../middlewares/auth.middleware');
 const { restrictTo } = require('../../middlewares/role.middleware');
 const validate = require('../../middlewares/validate.middleware');
-const { transactionIdValidation } = require('../../validations/partnerSubscription.validation');
+const {
+    transactionIdValidation,
+    renewSubscriptionValidation
+} = require('../../validations/partnerSubscription.validation');
 const { PARTNER } = require('../../constants/roles');
 
 const router = express.Router();
@@ -21,7 +24,26 @@ router.get('/', partnerSubscriptionController.getMySubscriptions);
 router.get('/history', partnerSubscriptionController.getMySubscriptions);
 router.get('/overview', partnerSubscriptionController.getOverview);
 router.get('/plans', customerSubscriptionController.getSubscriptionPlans);
-router.post('/renew', partnerSubscriptionController.createRenewal);
+router.get('/renew-options', partnerSubscriptionController.getRenewalOptions);
+router.post('/extend', partnerSubscriptionController.createExtension);
+router.post(
+    '/renew',
+    renewSubscriptionValidation,
+    validate,
+    partnerSubscriptionController.createRenewal
+);
+router.get(
+    '/payments/:transactionId/status',
+    transactionIdValidation,
+    validate,
+    partnerSubscriptionController.getRenewalStatus
+);
+router.post(
+    '/payments/:transactionId/cancel',
+    transactionIdValidation,
+    validate,
+    partnerSubscriptionController.cancelRenewal
+);
 router.get(
     '/renew/:transactionId/status',
     transactionIdValidation,

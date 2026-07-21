@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const PartnerSubscription = require('../models/PartnerSubscription');
 const SubscriptionHistory = require('../models/SubscriptionHistory');
 const Transaction = require('../models/Transaction');
+const SubscriptionPlan = require('../models/SubscriptionPlan');
 const AppError = require('../utils/AppError');
 
 const PAYMENT_WINDOW_MS = 30 * 60 * 1000;
@@ -26,7 +27,10 @@ const getPaymentDetails = (transaction) => {
         expiresAt: transaction.expiresAt,
         qrUrl,
         bank: adminBank,
-        accountNumber: adminVa
+        accountNumber: adminVa,
+        operation: transaction.metadata?.operation || null,
+        planId: transaction.metadata?.planId || null,
+        planName: transaction.metadata?.planName || null
     };
 };
 
@@ -36,7 +40,7 @@ const expireStaleRenewals = async (partnerId) => {
             partnerId,
             transactionType: 'SUBSCRIPTION_PAYMENT',
             status: 'PENDING',
-            'metadata.operation': 'RENEW',
+            'metadata.operation': { $in: ['EXTEND', 'RENEW'] },
             expiresAt: { $lte: new Date() }
         },
         {
@@ -58,23 +62,47 @@ const normalizeSubscriptionStatus = async (subscription) => {
     return subscription;
 };
 
+const getRemainingTime = (expirationDate) => {
+    const milliseconds = Math.max(new Date(expirationDate).getTime() - Date.now(), 0);
+    return {
+        milliseconds,
+        days: Math.floor(milliseconds / DAY_MS),
+        hours: Math.floor((milliseconds % DAY_MS) / (60 * 60 * 1000)),
+        minutes: Math.floor((milliseconds % (60 * 60 * 1000)) / (60 * 1000)),
+        expired: milliseconds === 0
+    };
+};
+
+const calculateQueuedPeriod = ({ now, currentExpiration, lastQueuedExpiration, durationDays }) => {
+    const candidates = [new Date(now).getTime()];
+    if (currentExpiration) candidates.push(new Date(currentExpiration).getTime());
+    if (lastQueuedExpiration) candidates.push(new Date(lastQueuedExpiration).getTime());
+    const scheduledStartDate = new Date(Math.max(...candidates));
+    return {
+        scheduledStartDate,
+        scheduledExpirationDate: new Date(scheduledStartDate.getTime() + Number(durationDays) * DAY_MS)
+    };
+};
+
 const getOverview = async (partnerId) => {
     await expireStaleRenewals(partnerId);
+    await activateDueSubscriptions(partnerId);
 
-    let subscription = await PartnerSubscription.findOne({ partnerId })
-        .populate('planId')
-        .exec();
-
+    let subscription = await PartnerSubscription.findOne({ partnerId }).populate('planId').exec();
     subscription = await normalizeSubscriptionStatus(subscription);
 
-    const [pendingTransaction, history] = await Promise.all([
+    const [pendingTransaction, queuedSubscriptions, history] = await Promise.all([
         Transaction.findOne({
             partnerId,
             subscriptionId: subscription?._id || null,
             transactionType: 'SUBSCRIPTION_PAYMENT',
             status: { $in: ['PENDING', 'PROCESSING'] },
-            'metadata.operation': 'RENEW'
+            'metadata.operation': { $in: ['EXTEND', 'RENEW'] }
         }).sort({ createdAt: -1 }).lean(),
+        SubscriptionHistory.find({ partnerId, subscriptionStatus: 'PENDING' })
+            .populate('planId', 'planName code price discount durationDays planFeatures maxBuses maxRoutes')
+            .sort({ subscriptionDate: 1 })
+            .lean(),
         SubscriptionHistory.find({ partnerId })
             .populate('planId', 'planName code price discount durationDays')
             .sort({ createdAt: -1 })
@@ -83,22 +111,19 @@ const getOverview = async (partnerId) => {
     ]);
 
     const plan = subscription?.planId || null;
-    const now = Date.now();
-    const expirationTime = subscription ? new Date(subscription.expirationDate).getTime() : null;
-    const daysRemaining = expirationTime === null
-        ? null
-        : Math.max(0, Math.ceil((expirationTime - now) / DAY_MS));
-
+    const remainingTime = subscription ? getRemainingTime(subscription.expirationDate) : null;
     return {
         subscription: subscription ? {
             _id: subscription._id,
             status: subscription.subscriptionStatus,
             subscriptionDate: subscription.subscriptionDate,
             expirationDate: subscription.expirationDate,
-            daysRemaining,
+            daysRemaining: Math.ceil(remainingTime.milliseconds / DAY_MS),
+            remainingTime,
             autoRenew: subscription.autoRenew,
-            canRenew: ['ACTIVE', 'EXPIRED', 'CANCELLED'].includes(subscription.subscriptionStatus)
+            canExtend: ['ACTIVE', 'EXPIRED', 'CANCELLED'].includes(subscription.subscriptionStatus)
                 && plan?.status === 'ACTIVE',
+            canRenew: ['ACTIVE', 'EXPIRED', 'CANCELLED'].includes(subscription.subscriptionStatus),
             plan: plan ? {
                 _id: plan._id,
                 planName: plan.planName,
@@ -115,9 +140,19 @@ const getOverview = async (partnerId) => {
             } : null
         } : null,
         pendingPayment: pendingTransaction ? getPaymentDetails(pendingTransaction) : null,
+        queue: queuedSubscriptions.map((item, index) => ({
+            position: index + 1,
+            _id: item._id,
+            operation: item.operation,
+            scheduledStartDate: item.subscriptionDate,
+            scheduledExpirationDate: item.expirationDate,
+            status: item.subscriptionStatus,
+            plan: item.planId
+        })),
         history: history.map((item) => ({
             _id: item._id,
             transactionId: item.transactionId,
+            operation: item.operation,
             subscriptionDate: item.subscriptionDate,
             expirationDate: item.expirationDate,
             status: item.subscriptionStatus,
@@ -126,7 +161,7 @@ const getOverview = async (partnerId) => {
     };
 };
 
-const createRenewal = async (partnerId) => {
+const createSubscriptionPayment = async (partnerId, operation, requestedPlanId = null) => {
     await expireStaleRenewals(partnerId);
 
     let subscription = await PartnerSubscription.findOne({ partnerId })
@@ -141,9 +176,14 @@ const createRenewal = async (partnerId) => {
         throw new AppError('This subscription cannot be renewed in its current state', 409);
     }
 
-    const plan = subscription.planId;
+    const plan = operation === 'EXTEND'
+        ? subscription.planId
+        : await SubscriptionPlan.findOne({ _id: requestedPlanId, status: 'ACTIVE' });
     if (!plan || plan.status !== 'ACTIVE') {
-        throw new AppError('Your current plan is no longer available for renewal', 409);
+        throw new AppError('The selected subscription plan is not available', 409);
+    }
+    if (operation === 'RENEW' && String(plan._id) === String(subscription.planId._id)) {
+        throw new AppError('Use Extend to continue with the current plan', 409);
     }
 
     const existing = await Transaction.findOne({
@@ -151,18 +191,18 @@ const createRenewal = async (partnerId) => {
         subscriptionId: subscription._id,
         transactionType: 'SUBSCRIPTION_PAYMENT',
         status: { $in: ['PENDING', 'PROCESSING'] },
-        'metadata.operation': 'RENEW',
+        'metadata.operation': { $in: ['EXTEND', 'RENEW'] },
         expiresAt: { $gt: new Date() }
     }).sort({ createdAt: -1 });
 
     if (existing) {
+        if (existing.metadata?.operation !== operation || String(existing.metadata?.planId) !== String(plan._id)) {
+            throw new AppError('Complete or cancel the existing subscription payment first', 409);
+        }
         return { payment: getPaymentDetails(existing), reused: true };
     }
 
     const now = new Date();
-    const previousExpirationDate = new Date(subscription.expirationDate);
-    const targetStartDate = previousExpirationDate > now ? previousExpirationDate : now;
-    const targetEndDate = new Date(targetStartDate.getTime() + Number(plan.durationDays) * DAY_MS);
     const expiresAt = new Date(now.getTime() + PAYMENT_WINDOW_MS);
 
     const transaction = new Transaction({
@@ -174,15 +214,12 @@ const createRenewal = async (partnerId) => {
         status: 'PENDING',
         expiresAt,
         gateway: 'SEPAY',
-        description: `Renew ${plan.planName} subscription`,
+        description: `${operation === 'EXTEND' ? 'Extend' : 'Renew with'} ${plan.planName} subscription`,
         metadata: {
-            operation: 'RENEW',
+            operation,
             planId: plan._id,
             planName: plan.planName,
             durationDays: plan.durationDays,
-            previousExpirationDate,
-            targetStartDate,
-            targetEndDate,
             renewalLock: String(partnerId)
         }
     });
@@ -199,7 +236,7 @@ const createRenewal = async (partnerId) => {
             partnerId,
             transactionType: 'SUBSCRIPTION_PAYMENT',
             status: { $in: ['PENDING', 'PROCESSING'] },
-            'metadata.operation': 'RENEW',
+            'metadata.operation': { $in: ['EXTEND', 'RENEW'] },
             expiresAt: { $gt: new Date() }
         }).sort({ createdAt: -1 });
         if (!concurrentPayment) throw error;
@@ -207,6 +244,28 @@ const createRenewal = async (partnerId) => {
     }
 
     return { payment: getPaymentDetails(transaction), reused: false };
+};
+
+const createExtension = async (partnerId) => createSubscriptionPayment(partnerId, 'EXTEND');
+
+const createRenewal = async (partnerId, planId) => {
+    if (!mongoose.isValidObjectId(planId)) throw new AppError('Invalid plan ID', 400);
+    return createSubscriptionPayment(partnerId, 'RENEW', planId);
+};
+
+const getRenewalOptions = async (partnerId) => {
+    const subscription = await PartnerSubscription.findOne({ partnerId }).select('planId').lean();
+    if (!subscription) throw new AppError('No subscription was found for this partner', 404);
+
+    const plans = await SubscriptionPlan.find({
+        status: 'ACTIVE',
+        _id: { $ne: subscription.planId }
+    }).sort({ price: 1 }).lean();
+    return plans.map((plan) => ({
+        ...plan,
+        finalPrice: getDiscountedPrice(plan),
+        isCurrentPlan: false
+    }));
 };
 
 const getRenewalStatus = async (partnerId, transactionId) => {
@@ -218,7 +277,7 @@ const getRenewalStatus = async (partnerId, transactionId) => {
         _id: transactionId,
         partnerId,
         transactionType: 'SUBSCRIPTION_PAYMENT',
-        'metadata.operation': 'RENEW'
+        'metadata.operation': { $in: ['EXTEND', 'RENEW'] }
     });
 
     if (!transaction) {
@@ -227,22 +286,27 @@ const getRenewalStatus = async (partnerId, transactionId) => {
 
     if (transaction.status === 'PENDING' && transaction.expiresAt <= new Date()) {
         transaction.status = 'EXPIRED';
+        if (transaction.metadata?.renewalLock) {
+            delete transaction.metadata.renewalLock;
+            transaction.markModified('metadata');
+        }
         await transaction.save();
     }
 
-    const subscription = transaction.status === 'SUCCESS'
-        ? await PartnerSubscription.findById(transaction.subscriptionId)
+    const queuedSubscription = transaction.status === 'SUCCESS'
+        ? await SubscriptionHistory.findOne({ transactionId: transaction._id })
             .populate('planId', 'planName code durationDays')
             .lean()
         : null;
 
     return {
         ...getPaymentDetails(transaction),
-        subscription: subscription ? {
-            status: subscription.subscriptionStatus,
-            subscriptionDate: subscription.subscriptionDate,
-            expirationDate: subscription.expirationDate,
-            plan: subscription.planId
+        operation: transaction.metadata?.operation,
+        queuedSubscription: queuedSubscription ? {
+            status: queuedSubscription.subscriptionStatus,
+            scheduledStartDate: queuedSubscription.subscriptionDate,
+            scheduledExpirationDate: queuedSubscription.expirationDate,
+            plan: queuedSubscription.planId
         } : null
     };
 };
@@ -258,7 +322,7 @@ const cancelRenewal = async (partnerId, transactionId) => {
             partnerId,
             transactionType: 'SUBSCRIPTION_PAYMENT',
             status: 'PENDING',
-            'metadata.operation': 'RENEW'
+            'metadata.operation': { $in: ['EXTEND', 'RENEW'] }
         },
         {
             $set: { status: 'CANCELLED' },
@@ -274,74 +338,88 @@ const cancelRenewal = async (partnerId, transactionId) => {
     return { transactionId: transaction._id, status: transaction.status };
 };
 
-const fulfillRenewal = async (transaction) => {
-    const existingHistory = await SubscriptionHistory.findOne({ transactionId: transaction._id }).lean();
-    if (existingHistory) {
-        return existingHistory;
+const activateDueSubscriptions = async (partnerId = null) => {
+    const now = new Date();
+    const filter = { subscriptionStatus: 'PENDING', subscriptionDate: { $lte: now } };
+    if (partnerId) filter.partnerId = partnerId;
+
+    const dueItems = await SubscriptionHistory.find(filter).sort({ subscriptionDate: 1, createdAt: 1 });
+    let activated = 0;
+    for (const queuedItem of dueItems) {
+        const subscription = await PartnerSubscription.findOne({ partnerId: queuedItem.partnerId });
+        if (!subscription) continue;
+
+        if (
+            subscription.subscriptionStatus === 'ACTIVE'
+            && new Date(subscription.expirationDate) > now
+        ) {
+            continue;
+        }
+
+        await SubscriptionHistory.updateMany(
+            {
+                partnerId: queuedItem.partnerId,
+                subscriptionStatus: 'ACTIVE',
+                expirationDate: { $lte: now }
+            },
+            { $set: { subscriptionStatus: 'EXPIRED' } }
+        );
+
+        subscription.planId = queuedItem.planId;
+        subscription.subscriptionDate = queuedItem.subscriptionDate;
+        subscription.expirationDate = queuedItem.expirationDate;
+        subscription.subscriptionStatus = 'ACTIVE';
+        subscription.cancelledAt = null;
+        await subscription.save();
+
+        queuedItem.subscriptionStatus = 'ACTIVE';
+        await queuedItem.save();
+        activated += 1;
     }
+    return { activated };
+};
+
+const fulfillSubscriptionPurchase = async (transaction) => {
+    const existingHistory = await SubscriptionHistory.findOne({ transactionId: transaction._id });
+    if (existingHistory) return existingHistory;
 
     const metadata = transaction.metadata || {};
-    const previousExpirationDate = new Date(metadata.previousExpirationDate);
-    const targetStartDate = new Date(metadata.targetStartDate);
-    const targetEndDate = new Date(metadata.targetEndDate);
-
-    if (
-        !metadata.planId
-        || [previousExpirationDate, targetStartDate, targetEndDate].some((date) => Number.isNaN(date.getTime()))
-    ) {
-        throw new AppError('Renewal transaction metadata is incomplete', 409);
+    if (!['EXTEND', 'RENEW'].includes(metadata.operation) || !mongoose.isValidObjectId(metadata.planId)) {
+        throw new AppError('Subscription payment metadata is incomplete', 409);
     }
 
-    const subscription = await PartnerSubscription.findOne({
-        _id: transaction.subscriptionId,
-        partnerId: transaction.partnerId,
-        planId: metadata.planId
+    const [subscription, plan, lastQueuedItem] = await Promise.all([
+        PartnerSubscription.findOne({ _id: transaction.subscriptionId, partnerId: transaction.partnerId }),
+        SubscriptionPlan.findById(metadata.planId),
+        SubscriptionHistory.findOne({
+            partnerId: transaction.partnerId,
+            subscriptionStatus: 'PENDING'
+        }).sort({ expirationDate: -1 })
+    ]);
+    if (!subscription) throw new AppError('The linked subscription no longer exists', 409);
+    if (!plan) throw new AppError('The purchased subscription plan no longer exists', 409);
+
+    const { scheduledStartDate, scheduledExpirationDate } = calculateQueuedPeriod({
+        now: new Date(),
+        currentExpiration: subscription.subscriptionStatus === 'ACTIVE'
+            ? subscription.expirationDate
+            : null,
+        lastQueuedExpiration: lastQueuedItem?.expirationDate || null,
+        durationDays: plan.durationDays
     });
-    if (!subscription) {
-        throw new AppError('The subscription linked to this renewal no longer exists', 409);
-    }
 
-    const currentExpiration = new Date(subscription.expirationDate);
-    if (currentExpiration.getTime() !== previousExpirationDate.getTime()) {
-        if (currentExpiration >= targetEndDate) {
-            return SubscriptionHistory.findOneAndUpdate(
-                { transactionId: transaction._id },
-                {
-                    $setOnInsert: {
-                        partnerId: transaction.partnerId,
-                        planId: metadata.planId,
-                        transactionId: transaction._id,
-                        subscriptionDate: targetStartDate,
-                        expirationDate: targetEndDate,
-                        subscriptionStatus: 'ACTIVE'
-                    }
-                },
-                { upsert: true, returnDocument: 'after' }
-            );
-        }
-        throw new AppError('The subscription changed while this renewal was awaiting payment', 409);
-    }
+    const queuedItem = await SubscriptionHistory.create({
+        partnerId: transaction.partnerId,
+        planId: plan._id,
+        transactionId: transaction._id,
+        operation: metadata.operation,
+        subscriptionDate: scheduledStartDate,
+        expirationDate: scheduledExpirationDate,
+        subscriptionStatus: 'PENDING'
+    });
 
-    subscription.subscriptionStatus = 'ACTIVE';
-    subscription.subscriptionDate = targetStartDate;
-    subscription.expirationDate = targetEndDate;
-    subscription.cancelledAt = null;
-    await subscription.save();
-
-    return SubscriptionHistory.findOneAndUpdate(
-        { transactionId: transaction._id },
-        {
-            $setOnInsert: {
-                partnerId: transaction.partnerId,
-                planId: metadata.planId,
-                transactionId: transaction._id,
-                subscriptionDate: targetStartDate,
-                expirationDate: targetEndDate,
-                subscriptionStatus: 'ACTIVE'
-            }
-        },
-        { upsert: true, returnDocument: 'after' }
-    );
+    await activateDueSubscriptions(transaction.partnerId);
+    return SubscriptionHistory.findById(queuedItem._id);
 };
 
 const getMySubscriptions = async (partnerId, query = {}) => {
@@ -411,6 +489,7 @@ const getMySubscriptions = async (partnerId, query = {}) => {
                 subscriptionDate: 1,
                 expirationDate: 1,
                 subscriptionStatus: 1,
+                operation: 1,
                 transactionId: 1,
                 plan: {
                     _id: '$plan._id',
@@ -433,8 +512,13 @@ const getMySubscriptions = async (partnerId, query = {}) => {
 module.exports = {
     getMySubscriptions,
     getOverview,
+    getRenewalOptions,
+    createExtension,
     createRenewal,
     getRenewalStatus,
     cancelRenewal,
-    fulfillRenewal
+    fulfillSubscriptionPurchase,
+    fulfillRenewal: fulfillSubscriptionPurchase,
+    activateDueSubscriptions,
+    calculateQueuedPeriod
 };

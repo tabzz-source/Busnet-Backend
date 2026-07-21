@@ -14,6 +14,7 @@ const { sweepExpiredBans } = require("./services/banExpiry.service");
 connectDB();
 const expireBookingsJob = require("./jobs/expireBookings.job");
 const completeArrivedBookingsJob = require("./jobs/completeArrivedBookings.job");
+const activateQueuedSubscriptionsJob = require("./jobs/activateQueuedSubscriptions.job");
 
 // No dedicated job runner in this codebase — a plain interval is enough for
 // a single lightweight sweep. Mongoose buffers the query until the initial
@@ -78,9 +79,10 @@ const startBookingJobs = () => {
 
     isRunning = true;
     try {
-      const [expiredResult, completedResult] = await Promise.all([
+      const [expiredResult, completedResult, subscriptionResult] = await Promise.all([
         expireBookingsJob(),
         completeArrivedBookingsJob(),
+        activateQueuedSubscriptionsJob(),
       ]);
 
       if (expiredResult.expiredCount > 0) {
@@ -90,6 +92,12 @@ const startBookingJobs = () => {
       if (completedResult.completedBookingCount > 0) {
         console.log(
           `[Booking Jobs] Completed arrived bookings: ${completedResult.completedBookingCount}`,
+        );
+      }
+
+      if (subscriptionResult.activated > 0) {
+        console.log(
+          `[Subscription Jobs] Activated queued subscriptions: ${subscriptionResult.activated}`,
         );
       }
     } catch (error) {

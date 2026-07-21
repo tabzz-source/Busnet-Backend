@@ -12,14 +12,31 @@ const getMySubscriptions = asyncHandler(async (req, res) => {
     return res.status(200).json({ success: true, ...result });
 });
 
+const getRenewalOptions = asyncHandler(async (req, res) => {
+    const data = await partnerSubscriptionService.getRenewalOptions(req.user.id);
+    return successResponse(res, 200, 'Renewal plan options retrieved successfully', data);
+});
+
+const createExtension = asyncHandler(async (req, res) => {
+    const data = await partnerSubscriptionService.createExtension(req.user.id);
+    return successResponse(
+        res,
+        data.reused ? 200 : 201,
+        data.reused
+            ? 'An existing pending extension payment was returned'
+            : 'Extension payment created successfully',
+        data
+    );
+});
+
 const createRenewal = asyncHandler(async (req, res) => {
-    const data = await partnerSubscriptionService.createRenewal(req.user.id);
+    const data = await partnerSubscriptionService.createRenewal(req.user.id, req.body.planId);
     return successResponse(
         res,
         data.reused ? 200 : 201,
         data.reused
             ? 'An existing pending renewal payment was returned'
-            : 'Renewal payment created successfully',
+            : 'Renewal payment for the selected plan created successfully',
         data
     );
 });
@@ -43,6 +60,8 @@ const cancelRenewal = asyncHandler(async (req, res) => {
 module.exports = {
     getOverview,
     getMySubscriptions,
+    getRenewalOptions,
+    createExtension,
     createRenewal,
     getRenewalStatus,
     cancelRenewal

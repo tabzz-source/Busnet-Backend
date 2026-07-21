@@ -2,6 +2,7 @@ const Transaction = require("../models/Transaction");
 const Account = require("../models/Account");
 const PartnerInformation = require("../models/PartnerInformation");
 const PartnerSubscription = require("../models/PartnerSubscription");
+const SubscriptionHistory = require("../models/SubscriptionHistory");
 const SubscriptionPlan = require("../models/SubscriptionPlan");
 const emailService = require("../services/email.service");
 const bookingService = require("../services/booking.service");
@@ -220,10 +221,10 @@ const handleWebhook = asyncHandler(async (req, res) => {
     }
 
     // C. Handle initial activation or an authenticated renewal.
-    if (transaction.metadata?.operation === 'RENEW') {
+    if (['EXTEND', 'RENEW'].includes(transaction.metadata?.operation)) {
       try {
-        await partnerSubscriptionService.fulfillRenewal(transaction);
-        console.log(`[SePay Webhook] Renewed subscription ${subscriptionId}`);
+        await partnerSubscriptionService.fulfillSubscriptionPurchase(transaction);
+        console.log(`[SePay Webhook] Queued subscription purchase ${subscriptionId}`);
       } catch (error) {
         transaction.status = 'FAILED';
       transaction.metadata = {
@@ -257,6 +258,23 @@ const handleWebhook = asyncHandler(async (req, res) => {
           subscriptionStatus: 'ACTIVE'
         });
         subscriptionId = subscription._id;
+        transaction.subscriptionId = subscription._id;
+
+        await SubscriptionHistory.findOneAndUpdate(
+          { transactionId: transaction._id },
+          {
+            $setOnInsert: {
+              partnerId: accountId,
+              planId,
+              transactionId: transaction._id,
+              operation: 'INITIAL',
+              subscriptionDate: subscription.subscriptionDate,
+              expirationDate: subscription.expirationDate,
+              subscriptionStatus: 'ACTIVE'
+            }
+          },
+          { upsert: true, returnDocument: 'after' }
+        );
 
         // Clear temporary field now that subscription is active
         if (partnerInfo) {
@@ -285,7 +303,7 @@ const handleWebhook = asyncHandler(async (req, res) => {
     }
 
     // D. Send Partner Welcome Email
-    if (account && partnerInfo && transaction.metadata?.operation !== 'RENEW') {
+    if (account && partnerInfo && !['EXTEND', 'RENEW'].includes(transaction.metadata?.operation)) {
       const partnerLoginUrl = process.env.PARTNER_DASHBOARD_LOGIN_URL || 'http://localhost:5173/login';
       emailService.sendPartnerWelcomeEmail(account.email, partnerInfo.operatorName, partnerLoginUrl)
         .then(() => console.log(`[SePay Webhook] Welcome email sent successfully to ${account.email}`))
