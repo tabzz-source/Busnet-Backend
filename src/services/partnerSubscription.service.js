@@ -48,6 +48,17 @@ const expireStaleRenewals = async (partnerId) => {
             $unset: { 'metadata.renewalLock': '' }
         }
     );
+
+    await Transaction.updateMany(
+        {
+            partnerId,
+            status: { $in: ['SUCCESS', 'EXPIRED', 'FAILED', 'CANCELLED', 'REFUNDED'] },
+            'metadata.renewalLock': { $exists: true }
+        },
+        {
+            $unset: { 'metadata.renewalLock': '' }
+        }
+    );
 };
 
 const normalizeSubscriptionStatus = async (subscription) => {
