@@ -148,4 +148,3 @@ exports.validateBusCreated = (req, res, next) =>
 
 exports.validateBusUpdated = (req, res, next) =>
     validateBus(req, res, next, updateRules);
-

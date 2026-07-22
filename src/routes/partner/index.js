@@ -20,8 +20,8 @@ router.use('/forgot-password', forgotPasswordRoutes);
 router.use('/schedules', scheduleRoutes);
 router.use('/dashboard', dashboardRoutes);
 router.use('/routes', routeRoutes);
-router.use('/blogs', blogRoutes);
 router.use('/buses', busRoutes);
+router.use('/blogs', blogRoutes);
 router.use('/tickets', ticketRoutes);
 router.use('/bookings', bookingRoutes);
 

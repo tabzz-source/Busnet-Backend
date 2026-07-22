@@ -1,4 +1,4 @@
-const { param } = require('express-validator');
+const { body, param } = require('express-validator');
 
 const transactionIdValidation = [
     param('transactionId')
@@ -6,4 +6,12 @@ const transactionIdValidation = [
         .withMessage('Invalid transaction ID')
 ];
 
-module.exports = { transactionIdValidation };
+const renewSubscriptionValidation = [
+    body('planId')
+        .notEmpty()
+        .withMessage('Plan ID is required')
+        .isMongoId()
+        .withMessage('Invalid plan ID')
+];
+
+module.exports = { transactionIdValidation, renewSubscriptionValidation };
