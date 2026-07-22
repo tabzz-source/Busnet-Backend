@@ -8,7 +8,20 @@ const { validateUpdateProfile } = require('../../validations/profile.validation'
 const router = express.Router();
 
 router.get('/me', authenticate, customerProfileController.getMyProfile);
-router.patch('/change-password', authenticate, validateChangePassword, customerProfileController.changePassword);
-router.patch('/me', authenticate, upload.single('profilePicture'), validateUpdateProfile, customerProfileController.updateMyProfile);
+
+router.patch(
+  '/change-password',
+  authenticate,
+  validateChangePassword,
+  customerProfileController.changePassword
+);
+
+router.patch(
+  '/me',
+  authenticate,
+  upload.single('profilePicture'),
+  validateUpdateProfile,
+  customerProfileController.updateMyProfile
+);
 
 module.exports = router;

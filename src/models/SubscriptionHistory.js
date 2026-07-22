@@ -22,6 +22,12 @@ const subscriptionHistorySchema = new mongoose.Schema(
             default: null
         },
 
+        operation: {
+            type: String,
+            enum: ['INITIAL', 'EXTEND', 'RENEW'],
+            default: 'INITIAL'
+        },
+
         subscriptionDate: {
             type: Date,
             required: true
@@ -43,5 +49,11 @@ const subscriptionHistorySchema = new mongoose.Schema(
         collection: 'subscription_histories'
     }
 );
+
+subscriptionHistorySchema.index(
+    { transactionId: 1 },
+    { unique: true, sparse: true }
+);
+subscriptionHistorySchema.index({ partnerId: 1, subscriptionStatus: 1, subscriptionDate: 1 });
 
 module.exports = mongoose.model('SubscriptionHistory', subscriptionHistorySchema);

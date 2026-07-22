@@ -38,7 +38,7 @@ const accountSchema = new mongoose.Schema(
 
         status: {
             type: String,
-            enum: ['UNVERIFIED', 'ACTIVE', 'DELETED', 'BANNED', 'PENDING_APPROVAL'],
+            enum: ['UNVERIFIED', 'ACTIVE', 'DELETED', 'BANNED', 'PENDING_APPROVAL', 'DISABLED'],
             default: 'UNVERIFIED'
         },
 
@@ -78,6 +78,19 @@ const accountSchema = new mongoose.Schema(
             default: false
         },
 
+        // Progressive lockout for repeated failed email-verification attempts
+        // (admin self-verify flow): each time the lock is triggered again,
+        // emailVerifyLockStrikes goes up and the lock duration doubles.
+        emailVerifyLockedUntil: {
+            type: Date,
+            default: null
+        },
+
+        emailVerifyLockStrikes: {
+            type: Number,
+            default: 0
+        },
+
         isPhoneVerified: {
             type: Boolean,
             default: false
@@ -92,6 +105,11 @@ const accountSchema = new mongoose.Schema(
             type: Boolean,
             default: false
         },
+        lastLoginAt: {
+            type: Date,
+            default: null
+        },
+
         deletedAt: {
             type: Date,
             default: null

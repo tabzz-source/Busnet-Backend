@@ -50,7 +50,7 @@ const transactionSchema = new mongoose.Schema(
 
         status: {
             type: String,
-            enum: ['PENDING', 'SUCCESS', 'FAILED', 'EXPIRED', 'REFUNDED', 'CANCELLED'],
+            enum: ['PENDING', 'PROCESSING', 'SUCCESS', 'FAILED', 'EXPIRED', 'REFUNDED', 'CANCELLED'],
             default: 'PENDING',
             index: true
         },
@@ -130,6 +130,13 @@ const transactionSchema = new mongoose.Schema(
         timestamps: true,
         collection: 'transactions'
     }
+);
+
+// Only one open renewal payment may exist per Partner. The service removes
+// this lock when the payment reaches a terminal state.
+transactionSchema.index(
+    { 'metadata.renewalLock': 1 },
+    { unique: true, sparse: true }
 );
 
 module.exports = mongoose.model('Transaction', transactionSchema);

@@ -121,6 +121,34 @@ const bookingSchema = new mongoose.Schema(
             default: ''
         },
 
+        cancellationDecision: {
+            type: String,
+            enum: ['APPROVED', 'REJECTED'],
+            default: null
+        },
+
+        cancellationRespondedAt: {
+            type: Date,
+            default: null
+        },
+
+        cancellationProcessing: {
+            type: Boolean,
+            default: false,
+            select: false
+        },
+
+        refundAmount: {
+            type: Number,
+            default: 0,
+            min: 0
+        },
+
+        refundPolicy: {
+            type: mongoose.Schema.Types.Mixed,
+            default: null
+        },
+
         payment_transactionId: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'Transaction',
@@ -155,6 +183,11 @@ const bookingSchema = new mongoose.Schema(
         },
 
         confirmedAt: {
+            type: Date,
+            default: null
+        },
+
+        cancelRequestedAt: {
             type: Date,
             default: null
         },

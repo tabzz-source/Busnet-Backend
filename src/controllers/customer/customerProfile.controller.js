@@ -16,6 +16,9 @@ const changePassword = asyncHandler(async (req, res) => {
 });
 
 const updateMyProfile = asyncHandler(async (req, res) => {
+    console.log('--- updateMyProfile Request ---');
+    console.log('req.body:', req.body);
+    console.log('req.file:', req.file);
     const result = await accountService.updateMyProfile(req.user.id, req.body, req.file);
 
     return successResponse(res, 200, 'Profile updated successfully', result);

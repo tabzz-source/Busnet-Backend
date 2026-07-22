@@ -34,7 +34,7 @@ const busSchema = new mongoose.Schema(
         totalSeats: {
             type: Number,
             required: true,
-            min: 1
+            min: 0
         },
 
         description: {
@@ -67,13 +67,13 @@ const busSchema = new mongoose.Schema(
         seatLayout_totalRows: {
             type: Number,
             required: true,
-            min: 1
+            min: 0
         },
 
         seatLayout_totalColumns: {
             type: Number,
             required: true,
-            min: 1
+            min: 0
         },
 
         seatLayout_totalFloors: {
