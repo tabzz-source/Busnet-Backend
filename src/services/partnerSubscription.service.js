@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const PartnerSubscription = require('../models/PartnerSubscription');
 const SubscriptionHistory = require('../models/SubscriptionHistory');
 const Transaction = require('../models/Transaction');
@@ -39,7 +40,7 @@ const getMySubscriptions = async (partnerId, query) => {
         if (subscriptionDateTo) {
             const end = new Date(subscriptionDateTo);
             end.setHours(23, 59, 59, 999);
-            match.subscriptionDateTo.$lte = end;
+            match.subscriptionDate.$lte = end;
         }
     }
 

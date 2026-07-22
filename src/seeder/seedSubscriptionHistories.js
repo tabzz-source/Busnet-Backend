@@ -2,10 +2,11 @@ const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 const SubscriptionHistory = require('../models/SubscriptionHistory');
 const SubscriptionPlan = require('../models/SubscriptionPlan');
+const PartnerSubscription = require('../models/PartnerSubscription');
+const PartnerInformation = require('../models/PartnerInformation');
+const Account = require('../models/Account');
 
 dotenv.config();
-
-const PARTNER_ACCOUNT_ID = '6a41f364712c182acbcf21c7';
 
 const seedSubscriptionHistories = async () => {
   try {
@@ -19,17 +20,20 @@ const seedSubscriptionHistories = async () => {
       process.exit(1);
     }
 
-    const basicPlan = plans.find((p) => p.code === 'BASIC');
-    const proPlan = plans.find((p) => p.code === 'PRO');
+    const basicPlan = plans.find((p) => p.code === 'BASIC') || plans[0];
+    const proPlan = plans.find((p) => p.code === 'PRO') || plans[plans.length - 1];
 
-    if (!basicPlan || !proPlan) {
-      console.error('❌ Could not find BASIC or PRO plans. Available plans:', plans.map((p) => p.code).join(', '));
+    // Find all partner accounts
+    const partnerAccounts = await Account.find({ role: 'PARTNER' }).lean();
+    console.log(`ℹ Found ${partnerAccounts.length} partner accounts.`);
+
+    if (partnerAccounts.length === 0) {
+      console.error('❌ No partner accounts found in DB.');
       process.exit(1);
     }
 
     const now = new Date();
 
-    // Helper to create dates relative to now
     const daysAgo = (days) => {
       const d = new Date(now);
       d.setDate(d.getDate() - days);
@@ -42,71 +46,88 @@ const seedSubscriptionHistories = async () => {
       return d;
     };
 
-    const MOCK_HISTORIES = [
-      // 1) First subscription — BASIC, expired 5 months ago
-      {
-        partnerId: new mongoose.Types.ObjectId(PARTNER_ACCOUNT_ID),
-        planId: basicPlan._id,
-        transactionId: null,
-        subscriptionDate: daysAgo(180),
-        expirationDate: daysAgo(150),
-        subscriptionStatus: 'EXPIRED'
-      },
-      // 2) Second subscription — BASIC renewed, expired 4 months ago
-      {
-        partnerId: new mongoose.Types.ObjectId(PARTNER_ACCOUNT_ID),
-        planId: basicPlan._id,
-        transactionId: null,
-        subscriptionDate: daysAgo(150),
-        expirationDate: daysAgo(120),
-        subscriptionStatus: 'EXPIRED'
-      },
-      // 3) Upgraded to PRO, expired 2 months ago
-      {
-        partnerId: new mongoose.Types.ObjectId(PARTNER_ACCOUNT_ID),
-        planId: proPlan._id,
-        transactionId: null,
-        subscriptionDate: daysAgo(120),
-        expirationDate: daysAgo(90),
-        subscriptionStatus: 'EXPIRED'
-      },
-      // 4) PRO cancelled after 10 days
-      {
-        partnerId: new mongoose.Types.ObjectId(PARTNER_ACCOUNT_ID),
-        planId: proPlan._id,
-        transactionId: null,
-        subscriptionDate: daysAgo(80),
-        expirationDate: daysAgo(50),
-        subscriptionStatus: 'CANCELLED'
-      },
-      // 5) Current active PRO subscription
-      {
-        partnerId: new mongoose.Types.ObjectId(PARTNER_ACCOUNT_ID),
-        planId: proPlan._id,
-        transactionId: null,
-        subscriptionDate: daysAgo(10),
-        expirationDate: daysFromNow(20),
-        subscriptionStatus: 'ACTIVE'
+    let totalInserted = 0;
+
+    for (const partner of partnerAccounts) {
+      const partnerId = partner._id;
+
+      // Clean old subscription histories for this partner
+      await SubscriptionHistory.deleteMany({ partnerId });
+
+      const mockHistories = [
+        {
+          partnerId,
+          planId: basicPlan._id,
+          transactionId: new mongoose.Types.ObjectId(),
+          subscriptionDate: daysAgo(180),
+          expirationDate: daysAgo(150),
+          subscriptionStatus: 'EXPIRED'
+        },
+        {
+          partnerId,
+          planId: basicPlan._id,
+          transactionId: new mongoose.Types.ObjectId(),
+          subscriptionDate: daysAgo(150),
+          expirationDate: daysAgo(120),
+          subscriptionStatus: 'EXPIRED'
+        },
+        {
+          partnerId,
+          planId: proPlan._id,
+          transactionId: new mongoose.Types.ObjectId(),
+          subscriptionDate: daysAgo(120),
+          expirationDate: daysAgo(90),
+          subscriptionStatus: 'EXPIRED'
+        },
+        {
+          partnerId,
+          planId: proPlan._id,
+          transactionId: new mongoose.Types.ObjectId(),
+          subscriptionDate: daysAgo(80),
+          expirationDate: daysAgo(50),
+          subscriptionStatus: 'CANCELLED'
+        },
+        {
+          partnerId,
+          planId: proPlan._id,
+          transactionId: new mongoose.Types.ObjectId(),
+          subscriptionDate: daysAgo(10),
+          expirationDate: daysFromNow(20),
+          subscriptionStatus: 'ACTIVE'
+        }
+      ];
+
+      for (const history of mockHistories) {
+        await SubscriptionHistory.create(history);
+        totalInserted++;
       }
-    ];
 
-    console.log(`ℹ Cleaning old subscription histories for partner ${PARTNER_ACCOUNT_ID}...`);
-    await SubscriptionHistory.deleteMany({
-      partnerId: new mongoose.Types.ObjectId(PARTNER_ACCOUNT_ID)
-    });
-    console.log('✅ Cleaned old subscription histories for this partner.');
+      // Sync active PartnerSubscription
+      const activeSub = mockHistories.find(h => h.subscriptionStatus === 'ACTIVE');
+      if (activeSub) {
+        await PartnerSubscription.findOneAndUpdate(
+          { partnerId },
+          {
+            partnerId,
+            planId: activeSub.planId,
+            subscriptionDate: activeSub.subscriptionDate,
+            expirationDate: activeSub.expirationDate,
+            subscriptionStatus: 'ACTIVE',
+            autoRenew: false
+          },
+          { upsert: true, returnDocument: 'after' }
+        );
 
-    let insertedCount = 0;
-    for (const history of MOCK_HISTORIES) {
-      await SubscriptionHistory.create(history);
-      insertedCount++;
-      const planCode = history.planId.equals(basicPlan._id) ? 'BASIC' : 'PRO';
-      console.log(
-        `+ Seeded subscription history: [${planCode}] ${history.subscriptionStatus} | ${history.subscriptionDate.toISOString().slice(0, 10)} → ${history.expirationDate.toISOString().slice(0, 10)}`
-      );
+        await PartnerInformation.findOneAndUpdate(
+          { accountId: partnerId },
+          { selectedPlanId: activeSub.planId }
+        );
+      }
+
+      console.log(`+ Seeded 5 subscription histories for partner [${partner.username || partner.email || partnerId}]`);
     }
 
-    console.log(`\n🎉 Seeding complete! Added ${insertedCount} subscription histories for partner "${PARTNER_ACCOUNT_ID}".`);
+    console.log(`\n🎉 Seeding complete! Added ${totalInserted} subscription histories across ${partnerAccounts.length} partners.`);
     process.exit(0);
   } catch (error) {
     console.error('❌ Seeding failed:', error.message);
